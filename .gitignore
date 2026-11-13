@@ -1,0 +1,30 @@
+# Variáveis de ambiente e credenciais
+.env
+.env.bak
+.env.local
+.sync.env
+*.env
+
+# Logs de auditoria e agendador
+logs/
+scheduler.json
+.auth-cache.json
+
+# Backups gerados pela sincronização
+backups_prod/
+backups_local/
+backups/
+
+# Python cache e artefatos
+__pycache__/
+*.py[cod]
+*$py.class
+*.log
+
+# PyInstaller / Executáveis e dependências Node
+node_modules/
+build/
+dist/
+*.spec
+*.exe
+

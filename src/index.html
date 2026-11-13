@@ -1,0 +1,1179 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:;">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EcoSync Bot • SGA 360°</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Barra de Título Customizada (Draggable no Electron) -->
+  <header class="titlebar">
+    <div class="titlebar-left">
+      <div class="titlebar-logo">
+        <div class="logo-emblem">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <rect x="4" y="6" width="16" height="13" rx="4"></rect>
+            <line x1="12" y1="2" x2="12" y2="6"></line>
+            <circle cx="12" cy="2" r="1"></circle>
+            <circle cx="9" cy="12" r="1.4" fill="currentColor"></circle>
+            <circle cx="15" cy="12" r="1.4" fill="currentColor"></circle>
+            <path d="M9 16h6"></path>
+          </svg>
+        </div>
+        <span>EcoSync Bot</span>
+        <span style="color: var(--text-dim); font-weight: 400;">• SGA 360°</span>
+        <span class="security-chip" title="Sandbox IPC, CSP restrito e transações atômicas ativos">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+          Seguro
+        </span>
+      </div>
+
+      <div class="titlebar-pills">
+        <div id="pill-local" class="status-pill checking">
+          <div class="status-dot pulse"></div>
+          <span>Local</span>
+          <span id="pill-local-latency" class="tabular" style="opacity: 0.85; font-size: 10px;">...</span>
+        </div>
+        <div id="pill-prod" class="status-pill checking">
+          <div class="status-dot pulse"></div>
+          <span>Produção</span>
+          <span id="pill-prod-latency" class="tabular" style="opacity: 0.85; font-size: 10px;">...</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="titlebar-right">
+      <span class="last-checked-label tabular" id="label-last-checked">Verificando...</span>
+      <div class="titlebar-controls">
+        <button class="win-btn" id="btn-minimize" title="Minimizar">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+        </button>
+        <button class="win-btn" id="btn-maximize" title="Maximizar / Restaurar">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>
+        </button>
+        <button class="win-btn close" id="btn-close" title="Fechar">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Container Geral -->
+  <div class="app-container">
+
+    <!-- Sidebar de Navegação -->
+    <aside class="sidebar">
+      <!-- Identidade do Robô -->
+      <div class="bot-identity-card">
+        <div class="bot-avatar" title="EcoSync Bot v1.1">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2">
+            <rect x="3" y="7" width="18" height="13" rx="4"></rect>
+            <line x1="12" y1="3" x2="12" y2="7"></line>
+            <circle cx="12" cy="2.5" r="1.2" fill="#34d399"></circle>
+            <circle cx="8.5" cy="13" r="1.5" fill="#60a5fa" stroke="none"></circle>
+            <circle cx="15.5" cy="13" r="1.5" fill="#60a5fa" stroke="none"></circle>
+            <path d="M9 17h6" stroke="#34d399" stroke-linecap="round"></path>
+          </svg>
+        </div>
+        <div class="bot-identity-info">
+          <div class="bot-identity-name">EcoSync Bot</div>
+          <div class="bot-mood-badge" id="bot-mood-badge">Iniciando...</div>
+          <div class="bot-version-line" id="bot-version-tag">v1.1.0</div>
+        </div>
+      </div>
+
+      <div class="sidebar-nav">
+        <div class="nav-category">Operações</div>
+        <button class="nav-item active" data-tab="tab-dashboard">
+          <span class="nav-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+            Dashboard
+          </span>
+        </button>
+        <button class="nav-item" data-tab="tab-sync">
+          <span class="nav-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            Sincronização
+          </span>
+        </button>
+        <button class="nav-item" data-tab="tab-diff">
+          <span class="nav-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+            Comparador Diff
+          </span>
+          <span class="nav-badge" id="nav-diff-badge">0</span>
+        </button>
+        <button class="nav-item" data-tab="tab-insights">
+          <span class="nav-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+            Raio-X do Banco
+          </span>
+        </button>
+        <button class="nav-item" data-tab="tab-scheduler">
+          <span class="nav-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            Robô Autônomo
+          </span>
+        </button>
+        <button class="nav-item" data-tab="tab-backups">
+          <span class="nav-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+            Backups & Auditoria
+          </span>
+        </button>
+
+        <div class="nav-category" style="margin-top: 14px;">Sistema & Segurança</div>
+        <button class="nav-item" data-tab="tab-settings">
+          <span class="nav-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+            Configurações (.env)
+          </span>
+        </button>
+        <button class="nav-item" data-tab="tab-heuristics">
+          <span class="nav-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+            Guia & Heurísticas
+          </span>
+        </button>
+      </div>
+
+      <div class="sidebar-footer">
+        <button class="update-pill-btn" id="btn-sidebar-update" title="Clique para ver e baixar a nova versão">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          <span id="sidebar-update-label">Nova versão disponível</span>
+        </button>
+        <div class="user-session-card" id="user-session-card" style="display: none;">
+          <div class="user-session-meta">
+            <div class="user-session-name" id="session-user-name">--</div>
+            <div class="user-session-role" id="session-user-role">--</div>
+          </div>
+          <button class="btn btn-secondary btn-sm" id="btn-logout" title="Encerrar sessão">Sair</button>
+        </div>
+        <div class="auto-refresh-row">
+          <span>Auto-monitor (30s)</span>
+          <label class="switch" title="Atualizar status automaticamente a cada 30 segundos">
+            <input type="checkbox" id="toggle-auto-refresh" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <button class="quick-sync-btn" id="btn-quick-push">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+          Sincronizar PUSH
+        </button>
+      </div>
+    </aside>
+
+    <!-- Área de Conteúdo -->
+    <main class="main-content">
+
+      <!-- ===================================================================
+           ABA 1: DASHBOARD
+           =================================================================== -->
+      <section id="tab-dashboard" class="tab-pane active">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Painel Geral do Robô</h1>
+            <p class="page-subtitle">Topologia ativa, telemetria PostgreSQL, conselheiro inteligente e paridade em tempo real.</p>
+          </div>
+          <div style="display: flex; gap: 10px;">
+            <button class="btn btn-secondary" id="btn-refresh-status">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+              Atualizar Status
+            </button>
+            <button class="btn btn-primary" id="hero-btn-dryrun">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              Simular (Dry-Run)
+            </button>
+          </div>
+        </div>
+
+        <!-- Topologia Visual em Tempo Real -->
+        <div class="topology-card" id="topology-card">
+          <div class="topology-node">
+            <div class="node-icon local">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+            </div>
+            <div class="node-meta">
+              <div class="node-title-row">
+                <span class="node-name">Banco Local</span>
+                <span id="topo-local-badge" class="badge badge-blue">Verificando</span>
+              </div>
+              <div class="node-url" id="topo-local-url">postgresql://postgres:****@localhost:5432/meu_banco</div>
+              <div class="node-sub" id="topo-local-ver">Aguardando diagnóstico...</div>
+            </div>
+          </div>
+
+          <div class="topology-bridge">
+            <span id="bridge-badge" class="badge badge-dim">Analisando rota...</span>
+            <div class="bridge-line">
+              <div class="bridge-beam" id="bridge-beam"></div>
+            </div>
+            <span class="bridge-status-text" id="bridge-status-text">Conexão transacional segura</span>
+          </div>
+
+          <div class="topology-node">
+            <div class="node-icon prod">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path></svg>
+            </div>
+            <div class="node-meta">
+              <div class="node-title-row">
+                <span class="node-name">Coolify Produção</span>
+                <span id="topo-prod-badge" class="badge badge-blue">Verificando</span>
+              </div>
+              <div class="node-url" id="topo-prod-url">postgresql://usuario:****@192.168.0.10:5432/meu_banco</div>
+              <div class="node-sub" id="topo-prod-ver">Aguardando diagnóstico...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Grid de Métricas Principais -->
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-header">
+              <span>Banco Local</span>
+              <span id="badge-local-status" class="badge badge-dim">--</span>
+            </div>
+            <div class="metric-value tabular">
+              <span id="dash-local-rows">--</span>
+              <span style="font-size: 13px; font-weight: 500; color: var(--text-dim);">linhas</span>
+            </div>
+            <div class="metric-sub tabular">
+              <span id="dash-local-tables">-- tabelas</span> • <span id="dash-local-ping">--ms</span> • <span id="dash-local-size">-- MB</span>
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-header">
+              <span>Banco Coolify</span>
+              <span id="badge-prod-status" class="badge badge-dim">--</span>
+            </div>
+            <div class="metric-value tabular">
+              <span id="dash-prod-rows">--</span>
+              <span style="font-size: 13px; font-weight: 500; color: var(--text-dim);">linhas</span>
+            </div>
+            <div class="metric-sub tabular">
+              <span id="dash-prod-tables">-- tabelas</span> • <span id="dash-prod-ping">--ms</span> • <span id="dash-prod-size">-- MB</span>
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-header">
+              <span>Integridade</span>
+              <span id="badge-integrity-status" class="badge badge-dim">--</span>
+            </div>
+            <div class="metric-value tabular">
+              <span id="dash-divergent-count">--</span>
+              <span style="font-size: 13px; font-weight: 500; color: var(--text-dim);">divergentes</span>
+            </div>
+            <div class="metric-sub tabular" id="dash-integrity-sub">Comparando contagens...</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-header">
+              <span>Backups Salvos</span>
+              <span class="badge badge-blue">Protegido</span>
+            </div>
+            <div class="metric-value tabular">
+              <span id="dash-backups-count">--</span>
+              <span style="font-size: 13px; font-weight: 500; color: var(--text-dim);">snapshots</span>
+            </div>
+            <div class="metric-sub tabular" id="dash-backups-sub">-- prod • -- local</div>
+          </div>
+        </div>
+
+        <!-- Conselheiro Inteligente do EcoSync -->
+        <div class="data-card" style="padding: 16px 18px; margin-bottom: 18px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+            <div class="data-card-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z"></path><line x1="9" y1="21" x2="15" y2="21"></line></svg>
+              EcoSync Smart Advisor (Recomendações Automáticas)
+            </div>
+            <button class="btn btn-secondary btn-sm" id="btn-refresh-advisor">Reanalisar</button>
+          </div>
+          <div class="advisor-grid" id="advisor-list">
+            <div class="advisor-card">
+              <div>
+                <div class="advisor-title">Analisando saúde dos bancos...</div>
+                <div class="advisor-desc">Coletando métricas de paridade, dead tuples e retenção de snapshots.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Gráficos Nativos (Latência + Top Tabelas) -->
+        <div class="charts-grid" style="margin-bottom: 18px;">
+          <div class="data-card" style="padding: 16px 18px; margin-bottom: 0;">
+            <div class="data-card-title" style="margin-bottom: 10px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+              Histórico de Latência (Últimas Leituras)
+            </div>
+            <div class="sparkline-box">
+              <svg id="sparkline-svg" class="sparkline-svg" viewBox="0 0 320 90" preserveAspectRatio="none"></svg>
+              <div class="sparkline-legend tabular">
+                <span style="color: #60a5fa;">● Local: <strong id="sparkline-local-latest">--ms</strong></span>
+                <span style="color: #34d399;">● Coolify: <strong id="sparkline-prod-latest">--ms</strong></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="data-card" style="padding: 16px 18px; margin-bottom: 0;">
+            <div class="data-card-title" style="margin-bottom: 12px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+              Top 6 Tabelas por Volume de Registros
+            </div>
+            <div class="bar-chart-list" id="top-tables-chart"></div>
+          </div>
+        </div>
+
+        <!-- Tabela de Visão Geral Paginada -->
+        <div class="data-card">
+          <div class="data-card-header">
+            <div class="data-card-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+              Tabelas e Paridade de Registros
+              <span style="font-size: 11px; font-weight: 400; color: var(--text-dim); margin-left: 6px;">(Clique na linha para ver Schema)</span>
+            </div>
+            <div class="toolbar-right">
+              <div class="filter-pills" id="overview-filters">
+                <button class="filter-pill active" data-filter="all">Todas</button>
+                <button class="filter-pill" data-filter="match">Em Sincronia</button>
+                <button class="filter-pill" data-filter="diff">Divergentes</button>
+              </div>
+              <input type="text" id="input-search-tables" class="table-search" placeholder="Buscar tabela...">
+            </div>
+          </div>
+          <table class="custom-table" id="table-overview">
+            <thead>
+              <tr>
+                <th>Nome da Tabela</th>
+                <th style="text-align: right;">Local</th>
+                <th style="text-align: right;">Coolify</th>
+                <th style="text-align: right;">Diferença</th>
+                <th style="text-align: center;">Status</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-overview"></tbody>
+          </table>
+          <div class="pagination-bar" id="pagination-overview"></div>
+        </div>
+      </section>
+
+
+      <!-- ===================================================================
+           ABA 2: SINCRONIZAÇÃO E TERMINAL AO VIVO
+           =================================================================== -->
+      <section id="tab-sync" class="tab-pane">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Execução de Sincronização</h1>
+            <p class="page-subtitle">Selecione a direção, escopo de tabelas, nível de proteção e acompanhe em tempo real.</p>
+          </div>
+        </div>
+
+        <!-- Seletor de Sentido -->
+        <div class="direction-grid">
+          <div class="direction-card selected" id="card-dir-push" data-dir="push">
+            <div class="direction-header">
+              <div class="direction-title" style="color: #60a5fa;">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+                PUSH: Local ➜ Produção
+              </div>
+              <span class="badge badge-blue">Padrão</span>
+            </div>
+            <p class="direction-desc">O banco <strong>Local</strong> é a fonte da verdade. Envia novos registros e atualizações para o servidor Coolify.</p>
+          </div>
+
+          <div class="direction-card" id="card-dir-pull" data-dir="pull">
+            <div class="direction-header">
+              <div class="direction-title" style="color: #34d399;">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+                PULL: Produção ➜ Local
+              </div>
+              <span class="badge badge-green">Download</span>
+            </div>
+            <p class="direction-desc">O servidor <strong>Coolify</strong> é a fonte da verdade. Atualiza o seu ambiente local com os dados de produção.</p>
+          </div>
+        </div>
+
+        <!-- Seletor Granular de Tabelas (--tables) -->
+        <div class="data-card" style="padding: 14px 16px; margin-bottom: 16px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 10px;">
+            <div style="font-size: 13px; font-weight: 600;">
+              Escopo de Tabelas (<span id="sync-scope-summary" style="color: #60a5fa;">Todas as tabelas</span>)
+            </div>
+            <div style="display: flex; gap: 6px;">
+              <button class="btn btn-secondary btn-sm" id="btn-tables-all">Todas</button>
+              <button class="btn btn-secondary btn-sm" id="btn-tables-divergent">Apenas Divergentes</button>
+              <button class="btn btn-secondary btn-sm" id="btn-tables-none">Limpar</button>
+            </div>
+          </div>
+          <div class="table-chips-wrap" id="sync-tables-chips"></div>
+        </div>
+
+        <!-- Opções de Segurança e Barra de Ações -->
+        <div class="sync-options-bar">
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <div style="font-size: 13px; color: var(--text-muted);">
+              Operação: <strong id="label-active-action" style="color: #fff;">PUSH (Local ➜ Produção)</strong>
+            </div>
+            <label class="sync-mode-switch" style="cursor: pointer;">
+              <input type="checkbox" id="chk-no-delete">
+              <span><strong>Modo Incremental Seguro (--no-delete):</strong> Nunca remove registros extras no destino</span>
+            </label>
+          </div>
+
+          <div style="display: flex; gap: 10px;">
+            <button class="btn btn-secondary" id="btn-sync-dryrun">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              Simulação (Dry-Run)
+            </button>
+            <button class="btn btn-primary" id="btn-sync-execute">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+              Aplicar Sincronização
+            </button>
+            <button class="btn btn-danger" id="btn-sync-cancel" disabled>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>
+              Cancelar
+            </button>
+          </div>
+        </div>
+
+        <!-- Stepper Visual de Execução -->
+        <div class="stepper" id="sync-stepper">
+          <div class="step-item" id="step-1"><span class="step-num">1</span> Conexão</div>
+          <div class="step-item" id="step-2"><span class="step-num">2</span> Comparação</div>
+          <div class="step-item" id="step-3"><span class="step-num">3</span> Backup JSON</div>
+          <div class="step-item" id="step-4"><span class="step-num">4</span> Transação SQL</div>
+          <div class="step-item" id="step-5"><span class="step-num">5</span> Concluído</div>
+        </div>
+
+        <!-- Terminal Colorido -->
+        <div class="terminal-card">
+          <div class="terminal-header">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span id="terminal-led" style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #3b82f6;"></span>
+              <span>CONSOLE TRANSACIONAL EM TEMPO REAL</span>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-secondary btn-sm" id="btn-copy-terminal">Copiar Logs</button>
+              <button class="btn btn-secondary btn-sm" id="btn-clear-terminal">Limpar</button>
+            </div>
+          </div>
+          <div class="terminal-body" id="terminal-output">
+            <div class="log-line log-dim">Aguardando comando de execução... Clique em "Simulação (Dry-Run)" para pré-visualizar com segurança.</div>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- ===================================================================
+           ABA 3: COMPARADOR DIFF
+           =================================================================== -->
+      <section id="tab-diff" class="tab-pane">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Comparador de Estrutura & Dados</h1>
+            <p class="page-subtitle">Inspeção linha a linha de inserções, atualizações, remoções e alinhamento de schema.</p>
+          </div>
+          <button class="btn btn-primary" id="btn-run-diff-check">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+            Calcular Diferenças Agora
+          </button>
+        </div>
+
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-header">Novos Registros</div>
+            <div class="metric-value tabular" style="color: #34d399;" id="diff-count-inserts">0</div>
+            <div class="metric-sub">Inserções pendentes</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-header">Alterados</div>
+            <div class="metric-value tabular" style="color: #fbbf24;" id="diff-count-updates">0</div>
+            <div class="metric-sub">Atualizações detectadas</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-header">Removidos</div>
+            <div class="metric-value tabular" style="color: #f87171;" id="diff-count-deletes">0</div>
+            <div class="metric-sub">Exclusões no espelhamento</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-header">Estrutura (Schema)</div>
+            <div class="metric-value tabular" style="color: #60a5fa;" id="diff-count-schema">0</div>
+            <div class="metric-sub">Tabelas ou colunas novas</div>
+          </div>
+        </div>
+
+        <div class="data-card">
+          <div class="data-card-header">
+            <div class="data-card-title">
+              Detalhamento por Tabela
+              <span style="font-size: 11px; font-weight: 400; color: var(--text-dim); margin-left: 6px;">(Clique na linha para ver amostra dos registros)</span>
+            </div>
+            <div class="toolbar-right">
+              <div class="filter-pills" id="diff-filters">
+                <button class="filter-pill active" data-filter="all">Todas</button>
+                <button class="filter-pill" data-filter="diff">Apenas Divergentes</button>
+              </div>
+              <input type="text" id="input-search-diff" class="table-search" placeholder="Filtrar tabela...">
+            </div>
+          </div>
+          <table class="custom-table">
+            <thead>
+              <tr>
+                <th>Tabela</th>
+                <th style="text-align: right;">Novos (+)</th>
+                <th style="text-align: right;">Alterados (~)</th>
+                <th style="text-align: right;">Removidos (-)</th>
+                <th style="text-align: center;">Status</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-diff"></tbody>
+          </table>
+          <div class="pagination-bar" id="pagination-diff"></div>
+        </div>
+      </section>
+
+
+      <!-- ===================================================================
+           ABA 4: RAIO-X DO BANCO (POSTGRESQL INSIGHTS)
+           =================================================================== -->
+      <section id="tab-insights" class="tab-pane">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Raio-X do Banco PostgreSQL</h1>
+            <p class="page-subtitle">Tamanho em disco, Cache Hit Ratio, conexões ativas, locks, tuplas mortas e inspeção de schema.</p>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary" id="btn-run-analyze" title="Executa ANALYZE no Local e Coolify para atualizar estatísticas">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+              Executar ANALYZE
+            </button>
+            <button class="btn btn-primary" id="btn-refresh-insights">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+              Atualizar Telemetria
+            </button>
+          </div>
+        </div>
+
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-header">Tamanho em Disco</div>
+            <div class="metric-value tabular" id="ins-local-size">-- MB</div>
+            <div class="metric-sub tabular">Coolify: <strong id="ins-prod-size">-- MB</strong></div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-header">Cache Hit Ratio</div>
+            <div class="metric-value tabular" style="color: #34d399;" id="ins-local-cache">--%</div>
+            <div class="metric-sub tabular">Coolify: <strong id="ins-prod-cache">--%</strong></div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-header">Conexões Ativas</div>
+            <div class="metric-value tabular" id="ins-local-conns">--</div>
+            <div class="metric-sub tabular">Coolify: <strong id="ins-prod-conns">--</strong></div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-header">Locks Aguardando</div>
+            <div class="metric-value tabular" id="ins-local-locks">0</div>
+            <div class="metric-sub tabular">Coolify: <strong id="ins-prod-locks">0</strong></div>
+          </div>
+        </div>
+
+        <div class="data-card">
+          <div class="data-card-header">
+            <div class="data-card-title">
+              Estatísticas Internas por Tabela
+              <span style="font-size: 11px; font-weight: 400; color: var(--text-dim); margin-left: 6px;">(Clique para abrir Schema Inspector)</span>
+            </div>
+            <div class="toolbar-right">
+              <div class="filter-pills" id="insights-source-filters">
+                <button class="filter-pill active" data-source="local">Local</button>
+                <button class="filter-pill" data-source="prod">Coolify</button>
+              </div>
+              <input type="text" id="input-search-insights" class="table-search" placeholder="Filtrar tabela...">
+            </div>
+          </div>
+          <table class="custom-table">
+            <thead>
+              <tr>
+                <th>Tabela</th>
+                <th style="text-align: right;">Total (KB)</th>
+                <th style="text-align: right;">Dados / Índices</th>
+                <th style="text-align: right;">Tuplas (Est. / Mortas)</th>
+                <th style="text-align: right;">Seq / Idx Scans</th>
+                <th style="text-align: center;">Autovacuum</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-insights"></tbody>
+          </table>
+          <div class="pagination-bar" id="pagination-insights"></div>
+        </div>
+      </section>
+
+
+      <!-- ===================================================================
+           ABA 5: ROBÔ AUTÔNOMO (AGENDADOR)
+           =================================================================== -->
+      <section id="tab-scheduler" class="tab-pane">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Robô Autônomo & Agendamento</h1>
+            <p class="page-subtitle">Configure ciclos automáticos inteligentes enquanto o EcoSync estiver aberto ou gere a tarefa no Windows.</p>
+          </div>
+        </div>
+
+        <div class="countdown-banner paused" id="sched-banner">
+          <div>
+            <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em;">Estado do Ciclo Autônomo</div>
+            <div style="font-size: 14px; font-weight: 600; color: #fff; margin-top: 2px;" id="sched-last-status">Agendador desativado</div>
+            <div style="font-size: 11.5px; color: var(--text-dim); margin-top: 2px;" id="sched-next-time">Nenhum ciclo agendado</div>
+          </div>
+          <div style="text-align: right;">
+            <div style="font-size: 11px; color: var(--text-dim);">Próxima execução em</div>
+            <div class="countdown-time" id="sched-countdown">--:--</div>
+          </div>
+        </div>
+
+        <div class="data-card" style="padding: 20px; margin-bottom: 18px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+            <label class="sync-mode-switch" style="cursor: pointer; font-size: 14px; font-weight: 600;">
+              <input type="checkbox" id="sched-enabled">
+              <span>Ativar Piloto Automático no App</span>
+            </label>
+            <button class="btn btn-primary" id="btn-save-scheduler">Salvar Agendamento</button>
+          </div>
+
+          <div class="scheduler-grid">
+            <div class="form-group">
+              <label class="form-label" for="sched-interval">Intervalo de Execução</label>
+              <select id="sched-interval" class="form-input">
+                <option value="5">A cada 5 minutos</option>
+                <option value="15">A cada 15 minutos</option>
+                <option value="30" selected>A cada 30 minutos</option>
+                <option value="60">A cada 1 hora</option>
+                <option value="120">A cada 2 horas</option>
+                <option value="360">A cada 6 horas</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="sched-direction">Sentido Automático</label>
+              <select id="sched-direction" class="form-input">
+                <option value="push">PUSH (Local ➜ Coolify)</option>
+                <option value="pull">PULL (Coolify ➜ Local)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Segurança de Exclusão</label>
+              <label class="sync-mode-switch" style="cursor: pointer; margin-top: 8px;">
+                <input type="checkbox" id="sched-nodelete" checked>
+                <span>Incremental Seguro (--no-delete)</span>
+              </label>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Economia Inteligente</label>
+              <label class="sync-mode-switch" style="cursor: pointer; margin-top: 8px;">
+                <input type="checkbox" id="sched-only-changes" checked>
+                <span>Só sincronizar quando houver divergência</span>
+              </label>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="sched-max-deletes">Trava Anti-Catástrofe (Máx. Exclusões)</label>
+              <input type="number" id="sched-max-deletes" class="form-input" min="0" max="10000" value="20">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Proteção de Acessos</label>
+              <label class="sync-mode-switch" style="cursor: pointer; margin-top: 8px;">
+                <input type="checkbox" id="sched-block-users" checked>
+                <span>Bloquear automático se alterar tabela usuarios</span>
+              </label>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Segundo Plano</label>
+              <label class="sync-mode-switch" style="cursor: pointer; margin-top: 8px;">
+                <input type="checkbox" id="sched-minimize-tray" checked>
+                <span>Manter ativo na bandeja do Windows ao fechar</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="data-card" style="padding: 18px 20px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+            <div class="data-card-title">Comando para Agendador de Tarefas do Windows (Sem Interface)</div>
+            <button class="btn btn-secondary btn-sm" id="btn-copy-sched-cmd">Copiar Comando</button>
+          </div>
+          <p style="font-size: 12.5px; color: var(--text-muted); margin-bottom: 10px;">Para rodar mesmo com o EcoSync Bot fechado em segundo plano via <code>taskschd.msc</code>:</p>
+          <div class="json-preview-box" id="sched-cli-cmd" style="max-height: 90px; color: #34d399;">python sync_prod.py --push --yes --no-delete</div>
+        </div>
+      </section>
+
+
+      <!-- ===================================================================
+           ABA 6: BACKUPS & AUDITORIA
+           =================================================================== -->
+      <section id="tab-backups" class="tab-pane">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Backups & Trilha de Auditoria</h1>
+            <p class="page-subtitle">Snapshots JSON gerados antes de cada alteração e registro imutável de ações.</p>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button class="btn btn-secondary" id="btn-cleanup-backups" title="Remove snapshots antigos preservando os 10 mais recentes de cada pasta">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path></svg>
+              Limpar Antigos (Manter 10)
+            </button>
+            <button class="btn btn-secondary" id="btn-open-backups-prod">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+              backups_prod
+            </button>
+            <button class="btn btn-secondary" id="btn-open-backups-local">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+              backups_local
+            </button>
+            <button class="btn btn-secondary" id="btn-open-logs-folder">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+              logs/
+            </button>
+          </div>
+        </div>
+
+        <div class="data-card">
+          <div class="data-card-header">
+            <div class="data-card-title">Snapshots de Produção (backups_prod)</div>
+          </div>
+          <table class="custom-table">
+            <thead>
+              <tr>
+                <th>Arquivo</th>
+                <th>Data e Hora</th>
+                <th style="text-align: right;">Tamanho</th>
+                <th style="text-align: right;">Tabelas / Registros</th>
+                <th style="text-align: center;">Inspeção</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-backups-prod"></tbody>
+          </table>
+          <div class="pagination-bar" id="pagination-backups-prod"></div>
+        </div>
+
+        <div class="data-card">
+          <div class="data-card-header">
+            <div class="data-card-title">Snapshots do Banco Local (backups_local)</div>
+          </div>
+          <table class="custom-table">
+            <thead>
+              <tr>
+                <th>Arquivo</th>
+                <th>Data e Hora</th>
+                <th style="text-align: right;">Tamanho</th>
+                <th style="text-align: right;">Tabelas / Registros</th>
+                <th style="text-align: center;">Inspeção</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-backups-local"></tbody>
+          </table>
+          <div class="pagination-bar" id="pagination-backups-local"></div>
+        </div>
+
+        <div class="data-card">
+          <div class="data-card-header">
+            <div class="data-card-title">Trilha de Auditoria Recente (logs/audit.jsonl)</div>
+          </div>
+          <table class="custom-table">
+            <thead>
+              <tr>
+                <th>Data / Hora</th>
+                <th>Autor</th>
+                <th>Ação</th>
+                <th>Direção / Modo</th>
+                <th style="text-align: right;">Duração</th>
+                <th style="text-align: center;">Resultado</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-audit"></tbody>
+          </table>
+          <div class="pagination-bar" id="pagination-audit"></div>
+        </div>
+      </section>
+
+
+      <!-- ===================================================================
+           ABA 7: CONFIGURAÇÕES (.ENV) COM PROTEÇÃO DE CREDENCIAIS
+           =================================================================== -->
+      <section id="tab-settings" class="tab-pane">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Configurações & Segurança (.env)</h1>
+            <p class="page-subtitle">Credenciais protegidas por mascaramento visual, validação estrita e backup automático (.env.bak).</p>
+          </div>
+          <button class="btn btn-secondary" id="btn-open-env-file">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+            Abrir .env Externo
+          </button>
+        </div>
+
+        <div class="data-card" style="padding: 24px;">
+          <div class="form-group">
+            <label class="form-label" for="setting-local-url">
+              <span>URL do Banco Local (LOCAL_DATABASE_URL / DATABASE_URL)</span>
+              <span class="badge badge-dim">Oculto por padrão</span>
+            </label>
+            <div class="input-secret-wrap">
+              <input type="password" id="setting-local-url" class="form-input" autocomplete="off">
+              <button type="button" class="btn-eye" data-target="setting-local-url" title="Mostrar / Ocultar credencial">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              </button>
+            </div>
+            <div class="masked-hint" id="hint-local-masked">Visão segura: --</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="setting-prod-url">
+              <span>URL do Banco Produção Coolify (PROD_DATABASE_URL)</span>
+              <span class="badge badge-dim">Oculto por padrão</span>
+            </label>
+            <div class="input-secret-wrap">
+              <input type="password" id="setting-prod-url" class="form-input" autocomplete="off">
+              <button type="button" class="btn-eye" data-target="setting-prod-url" title="Mostrar / Ocultar credencial">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              </button>
+            </div>
+            <div class="masked-hint" id="hint-prod-masked">Visão segura: --</div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
+            <div class="form-group">
+              <label class="form-label" for="setting-direction">Sentido Padrão (SYNC_DIRECTION)</label>
+              <select id="setting-direction" class="form-input">
+                <option value="push">PUSH (Local ➜ Produção)</option>
+                <option value="pull">PULL (Produção ➜ Local)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="setting-delete-missing">Política de Exclusão (PUSH)</label>
+              <select id="setting-delete-missing" class="form-input">
+                <option value="true">Espelho Completo (remove ausentes)</option>
+                <option value="false">Incremental Seguro (não apaga)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="setting-auto-confirm">Confirmação Automática (Robô)</label>
+              <select id="setting-auto-confirm" class="form-input">
+                <option value="false">false (Exige confirmação CLI)</option>
+                <option value="true">true (Autônomo sem perguntas)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="setting-exclude-tables">Tabelas Ignoradas (SYNC_EXCLUDE_TABLES, separadas por vírgula)</label>
+            <input type="text" id="setting-exclude-tables" class="form-input" placeholder="Ex: usuarios,historico_auditoria (vazio = sincroniza tudo)">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="setting-update-url">
+              <span>Fonte de Atualizações (APP_UPDATE_URL — GitHub Releases, URL HTTP/latest.json ou Pasta de Rede)</span>
+              <span class="badge badge-dim" id="badge-exe-mode">Detectando...</span>
+            </label>
+            <input type="text" id="setting-update-url" class="form-input" placeholder="Ex: https://github.com/sua-org/ecosync ou \\servidor\atualizacoes\ecosync">
+            <div class="masked-hint" id="update-status-hint">Verificação automática ativa após login para instalador (.exe) e portátil (.exe).</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="setting-update-token">
+              <span>Token GitHub para Repositório Privado (APP_UPDATE_TOKEN — Opcional)</span>
+              <span class="badge badge-dim">Oculto por padrão</span>
+            </label>
+            <div class="input-secret-wrap">
+              <input type="password" id="setting-update-token" class="form-input" placeholder="github_pat_... (necessário apenas se o repositório GitHub for privado)" autocomplete="off">
+              <button type="button" class="btn-eye" data-target="setting-update-token" title="Mostrar / Ocultar token">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              </button>
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
+            <button class="btn btn-secondary" id="btn-check-updates">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              Verificar Atualizações
+            </button>
+            <button class="btn btn-secondary" id="btn-test-env-conns">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+              Testar Conexões Agora
+            </button>
+            <button class="btn btn-primary" id="btn-save-env">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+              Salvar com Segurança
+            </button>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- ===================================================================
+           ABA 8: HEURÍSTICAS DE NIELSEN E SEGURANÇA
+           =================================================================== -->
+      <section id="tab-heuristics" class="tab-pane">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">UX, Segurança & 10 Heurísticas de Nielsen</h1>
+            <p class="page-subtitle">Arquitetura defensiva e princípios de usabilidade aplicados ao EcoSync Bot.</p>
+          </div>
+        </div>
+
+        <div class="data-card" style="padding: 24px; line-height: 1.65;">
+          <h3 style="color: var(--accent-blue); margin-bottom: 12px;">Camadas de Segurança Implementadas</h3>
+          <ul style="padding-left: 20px; color: var(--text-muted); display: flex; flex-direction: column; gap: 8px; font-size: 13px; margin-bottom: 22px;">
+            <li><strong>Isolamento Electron (Sandbox + ContextIsolation + CSP):</strong> Renderizador isolado sem acesso direto a Node.js, bloqueio de navegação externa e política restrita contra XSS.</li>
+            <li><strong>Pré-voo (Pre-flight) Antes da Confirmação:</strong> Antes de aplicar mudanças, o sistema calcula exatamente quantas inserções, alterações e exclusões ocorrerão e exige aceite explícito para remoções ou alterações de usuários.</li>
+            <li><strong>Proteção de Credenciais:</strong> URLs mascaradas na interface, campos ocultos por padrão e gravação validada no [.env] com backup automático (.env.bak).</li>
+            <li><strong>Transação Atômica & Trilha de Auditoria:</strong> Todas as operações SQL rodam em transação única (rollback automático em erro) e são registradas em <code>logs/audit.jsonl</code>.</li>
+          </ul>
+
+          <h3 style="color: #34d399; margin-bottom: 12px;">As 10 Heurísticas de Nielsen na Prática</h3>
+          <ul style="padding-left: 20px; color: var(--text-muted); display: flex; flex-direction: column; gap: 8px; font-size: 13px;">
+            <li><strong>1. Visibilidade do status:</strong> Topologia ativa, ping em ms, sparkline de latência, estado do EcoSync Bot e stepper de 5 etapas.</li>
+            <li><strong>2. Mundo real:</strong> Fluxo claro entre Local e Coolify Produção, termos em português e diferenciação visual entre Espelho e Incremental.</li>
+            <li><strong>3. Controle e liberdade:</strong> Simulação Dry-Run, seleção granular de tabelas, opção <code>--no-delete</code>, cancelamento instantâneo e pré-visualização de backups.</li>
+            <li><strong>4. Consistência:</strong> Design System unificado com paginação padrão e cores semânticas para status, adições, alterações e remoções.</li>
+            <li><strong>5. Prevenção de erros:</strong> Validação estrita de URLs, bloqueio de URLs iguais e trava de segurança para exclusões no modal.</li>
+            <li><strong>6. Reconhecimento:</strong> EcoSync Smart Advisor, gráficos e Raio-X PostgreSQL visíveis sem memorizar consultas SQL.</li>
+            <li><strong>7. Eficiência:</strong> Ação rápida PUSH, busca paginada em tempo real, agendador autônomo e auto-monitoramento configurável.</li>
+            <li><strong>8. Estética minimalista:</strong> Tabelas paginadas mantendo foco em sinal útil e hierarquia visual clara.</li>
+            <li><strong>9. Diagnóstico de erros:</strong> Mensagens humanas explicando falhas de conexão, locks, dead tuples ou configuração.</li>
+            <li><strong>10. Documentação integrada:</strong> Guia acessível direto no app e no README do projeto.</li>
+          </ul>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Modal de Confirmação Pre-Flight (Prevenção de Erros de Nielsen) -->
+  <div class="modal-overlay" id="confirm-modal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+        </div>
+        <div>
+          <div class="modal-title">Revisão Pré-Execução (Pre-flight)</div>
+          <div style="font-size: 12px; color: var(--text-dim);" id="modal-target-label">Destino: PRODUÇÃO (Coolify)</div>
+        </div>
+      </div>
+
+      <div class="modal-body">
+        <div id="modal-preflight-status" style="margin-bottom: 8px;">Calculando impacto exato nos bancos de dados...</div>
+
+        <div class="preflight-summary" id="modal-preflight-grid">
+          <div class="preflight-box">
+            <div class="preflight-num" style="color: #34d399;" id="pf-inserts">--</div>
+            <div class="preflight-lbl">Novos</div>
+          </div>
+          <div class="preflight-box">
+            <div class="preflight-num" style="color: #fbbf24;" id="pf-updates">--</div>
+            <div class="preflight-lbl">Alterados</div>
+          </div>
+          <div class="preflight-box">
+            <div class="preflight-num" style="color: #f87171;" id="pf-deletes">--</div>
+            <div class="preflight-lbl">Removidos</div>
+          </div>
+          <div class="preflight-box">
+            <div class="preflight-num" style="color: #60a5fa;" id="pf-schema">--</div>
+            <div class="preflight-lbl">Schema</div>
+          </div>
+        </div>
+
+        <div class="danger-alert" id="modal-danger-alert" style="display: none;">
+          <div id="modal-danger-text"></div>
+          <label class="safety-check-label">
+            <input type="checkbox" id="chk-safety-confirm">
+            <span>Estou ciente dos impactos acima e autorizo a transação.</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btn-modal-cancel">Cancelar</button>
+        <button class="btn btn-primary" id="btn-modal-confirm" disabled>Confirmar e Aplicar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de Pré-visualização Segura de Backup -->
+  <div class="modal-overlay" id="backup-modal">
+    <div class="modal-dialog wide">
+      <div class="modal-header">
+        <div class="modal-icon" style="background: var(--accent-blue-bg); border-color: rgba(59,130,246,0.3); color: #60a5fa;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+        </div>
+        <div>
+          <div class="modal-title" id="backup-modal-title">Inspeção de Snapshot</div>
+          <div style="font-size: 12px; color: var(--text-dim);">Campos sensíveis (senhas/tokens) são mascarados automaticamente</div>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div class="json-preview-box" id="backup-preview-content">Carregando snapshot...</div>
+        <div class="restore-confirm-box" id="restore-confirm-box" style="display: none;">
+          <div style="font-size: 12.5px; color: #fde68a; margin-bottom: 8px;" id="restore-confirm-msg">
+            Atenção: restaurar este snapshot gravará os registros no banco de destino (um pré-backup automático será salvo antes).
+          </div>
+          <label class="safety-check-label">
+            <input type="checkbox" id="chk-restore-confirm">
+            <span>Confirmo que desejo restaurar este snapshot agora.</span>
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btn-restore-backup-init" style="display: none;">Restaurar Snapshot...</button>
+        <button class="btn btn-danger" id="btn-restore-backup-confirm" style="display: none;" disabled>Confirmar Restauração</button>
+        <button class="btn btn-primary" id="btn-backup-modal-close">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Diff Linha a Linha (Amostra de Registros) -->
+  <div class="modal-overlay" id="diff-detail-modal">
+    <div class="modal-dialog wide">
+      <div class="modal-header">
+        <div class="modal-icon" style="background: var(--accent-blue-bg); border-color: rgba(59,130,246,0.3); color: #60a5fa;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+        </div>
+        <div>
+          <div class="modal-title" id="diff-detail-title">Detalhamento de Registros</div>
+          <div style="font-size: 12px; color: var(--text-dim);" id="diff-detail-subtitle">Amostra de inserções, alterações e remoções (campos sensíveis mascarados)</div>
+        </div>
+      </div>
+      <div class="modal-body" id="diff-detail-body" style="max-height: 440px; overflow-y: auto;"></div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="btn-diff-detail-close">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Schema Inspector -->
+  <div class="modal-overlay" id="schema-modal">
+    <div class="modal-dialog wide">
+      <div class="modal-header">
+        <div class="modal-icon" style="background: var(--accent-blue-bg); border-color: rgba(59,130,246,0.3); color: #34d399;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
+        </div>
+        <div>
+          <div class="modal-title" id="schema-modal-title">Schema Inspector</div>
+          <div style="font-size: 12px; color: var(--text-dim);" id="schema-modal-subtitle">Colunas, chaves estrangeiras e índices PostgreSQL</div>
+        </div>
+      </div>
+      <div class="modal-body" id="schema-modal-body" style="max-height: 440px; overflow-y: auto;">
+        Carregando estrutura...
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="btn-schema-modal-close">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de Atualização Universal (NSIS & Portátil) -->
+  <div class="modal-overlay" id="update-modal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-icon" style="background: rgba(59, 130, 246, 0.14); border-color: rgba(59, 130, 246, 0.35); color: #60a5fa;">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+        </div>
+        <div>
+          <div class="modal-title">Nova Atualização Disponível</div>
+          <div style="font-size: 12px; color: var(--text-dim);" id="update-modal-subtitle">Identificada compatibilidade automática com seu tipo de executável</div>
+        </div>
+      </div>
+
+      <div class="modal-body">
+        <div class="update-version-compare">
+          <div>
+            <div style="font-size: 11px; color: var(--text-dim);">Versão Atual ➜ Nova Versão</div>
+            <div style="font-size: 16px; font-weight: 700; color: #f8fafc; font-family: var(--font-mono);" id="update-ver-diff">v1.1.0 ➜ v1.2.0</div>
+          </div>
+          <span class="badge badge-blue" id="update-exe-badge">Portátil</span>
+        </div>
+
+        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;" id="update-file-meta">
+          Arquivo: --
+        </div>
+
+        <div class="update-notes-box" id="update-notes-box">Sem notas de lançamento informadas.</div>
+
+        <div class="update-progress-wrap" id="update-progress-wrap">
+          <div style="display: flex; justify-content: space-between; font-size: 12px; color: #cbd5e1;">
+            <span id="update-progress-label">Baixando nova versão...</span>
+            <span class="tabular" id="update-progress-pct">0%</span>
+          </div>
+          <div class="update-progress-bar">
+            <div class="update-progress-fill" id="update-progress-fill"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btn-update-later">Agora não</button>
+        <button class="btn btn-primary" id="btn-update-download">Baixar Nova Versão</button>
+        <button class="btn btn-primary" id="btn-update-install" style="display: none; background: linear-gradient(135deg, #10b981, #059669);">Aplicar e Reiniciar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tela de Login Obrigatório (Autenticação Segura via SGA / DPAPI) -->
+  <div class="login-overlay active" id="login-overlay">
+    <form class="login-card" id="login-form">
+      <div class="login-header">
+        <div class="login-avatar">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2">
+            <rect x="3" y="7" width="18" height="13" rx="4"></rect>
+            <line x1="12" y1="3" x2="12" y2="7"></line>
+            <circle cx="12" cy="2.5" r="1.2" fill="#34d399"></circle>
+            <circle cx="8.5" cy="13" r="1.5" fill="#60a5fa" stroke="none"></circle>
+            <circle cx="15.5" cy="13" r="1.5" fill="#60a5fa" stroke="none"></circle>
+            <path d="M9 17h6" stroke="#34d399" stroke-linecap="round"></path>
+          </svg>
+        </div>
+        <div class="login-title">EcoSync Bot • SGA 360°</div>
+        <div class="login-subtitle">Entre com suas credenciais da tabela de usuários do SGA</div>
+      </div>
+
+      <div class="login-error" id="login-error-box"></div>
+
+      <div class="form-group">
+        <label class="form-label" for="login-email">E-mail de Acesso</label>
+        <input type="email" id="login-email" class="form-input" placeholder="seu.email@dominio.com" autocomplete="username" required>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="login-password">Senha</label>
+        <div class="input-secret-wrap">
+          <input type="password" id="login-password" class="form-input" placeholder="••••••••" autocomplete="current-password" required>
+          <button type="button" class="btn-eye" data-target="login-password" title="Mostrar / Ocultar senha">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+          </button>
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary" id="btn-login-submit" style="width: 100%; justify-content: center; margin-top: 6px;">
+        Entrar no Painel Seguro
+      </button>
+    </form>
+  </div>
+
+  <!-- Container de Toast Notifications -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

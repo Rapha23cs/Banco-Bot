@@ -1,0 +1,58 @@
+{
+  "name": "ecosync-robo-banco",
+  "version": "1.1.0",
+  "description": "EcoSync Bot • SGA 360° Central de Sincronização Inteligente de Banco de Dados",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "postdist": "node scripts/generate-update-manifest.js"
+  },
+  "keywords": [
+    "database",
+    "postgresql",
+    "sync",
+    "ecosync",
+    "electron"
+  ],
+  "author": "DESSMA SGA",
+  "license": "ISC",
+  "build": {
+    "appId": "com.sga.ecosync",
+    "productName": "EcoSync Bot - SGA 360",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "files": [
+      "**/*",
+      "!backups_prod/*",
+      "!backups_local/*",
+      "!logs/*",
+      "!.env",
+      "!.env.bak",
+      "!scheduler.json",
+      "!.auth-cache.json",
+      "!.git/*"
+    ],
+    "extraResources": [
+      "api_bridge.py",
+      "sync_prod.py",
+      ".env.example"
+    ]
+  },
+  "devDependencies": {
+    "electron": "^45.3.2",
+    "electron-builder": "^26.18.0"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3"
+  }
+}
