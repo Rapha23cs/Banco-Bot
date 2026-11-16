@@ -1,6 +1,6 @@
 {
   "name": "ecosync-robo-banco",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "EcoSync Bot • SGA 360° Central de Sincronização Inteligente de Banco de Dados",
   "main": "main.js",
   "scripts": {
@@ -40,7 +40,9 @@
       "!.env.bak",
       "!scheduler.json",
       "!.auth-cache.json",
-      "!.git/*"
+      "!.git/*",
+      "!.github/*",
+      "!scripts/*"
     ],
     "extraResources": [
       "api_bridge.py",
