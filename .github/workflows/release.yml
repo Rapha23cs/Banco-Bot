@@ -26,7 +26,11 @@ jobs:
         run: npm ci
 
       - name: Build Windows executables (NSIS & Portable)
-        run: npm run dist
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: |
+          npx electron-builder --publish never
+          npm run postdist
 
       - name: Prepare release assets
         shell: pwsh
