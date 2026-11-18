@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('api', {
   previewBackup: (params) => ipcRenderer.invoke('preview-backup', params),
   cleanupBackups: (keep) => ipcRenderer.invoke('cleanup-backups', keep),
   restoreBackup: (params) => ipcRenderer.invoke('restore-backup', params),
+  createSnapshot: (target) => ipcRenderer.invoke('create-snapshot', target),
   runMaintenance: (target) => ipcRenderer.invoke('run-maintenance', target),
   getAuditLogs: () => ipcRenderer.invoke('get-audit-logs'),
 
@@ -37,6 +38,17 @@ contextBridge.exposeInMainWorld('api', {
   readEnvConfig: () => ipcRenderer.invoke('read-env-config'),
   saveEnvConfig: (config) => ipcRenderer.invoke('save-env-config', config),
   openEnvExternal: () => ipcRenderer.invoke('open-env-external'),
+
+  // Nuvem Criptografada (Google Drive)
+  cloudStatus: (checkRemote) => ipcRenderer.invoke('cloud-status', checkRemote),
+  cloudImportJson: () => ipcRenderer.invoke('cloud-import-json'),
+  cloudSave: (cfg) => ipcRenderer.invoke('cloud-save', cfg),
+  cloudConnect: () => ipcRenderer.invoke('cloud-connect'),
+  cloudDisconnect: () => ipcRenderer.invoke('cloud-disconnect'),
+  cloudUpload: (params) => ipcRenderer.invoke('cloud-upload', params),
+  cloudSyncAll: () => ipcRenderer.invoke('cloud-sync-all'),
+  cloudList: () => ipcRenderer.invoke('cloud-list'),
+  cloudDownload: (params) => ipcRenderer.invoke('cloud-download', params),
 
   // Atualizações Automáticas (NSIS & Portátil)
   getAppInfo: () => ipcRenderer.invoke('get-app-info'),

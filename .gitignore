@@ -9,6 +9,9 @@
 logs/
 scheduler.json
 .auth-cache.json
+*.dpapi
+*client_secret*.json
+gdrive_token.json
 
 # Backups gerados pela sincronização
 backups_prod/

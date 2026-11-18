@@ -253,8 +253,10 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (tabId === 'tab-backups') {
       loadBackups();
       loadAuditLogs();
+      loadCloudStatus(true);
     } else if (tabId === 'tab-settings') {
       loadSettings();
+      loadCloudStatus(true);
     }
   }
 
@@ -1840,7 +1842,18 @@ document.addEventListener('DOMContentLoaded', () => {
         tdFile.style.fontFamily = 'var(--font-mono)';
         tdFile.style.color = '#60a5fa';
         tdFile.style.fontWeight = '500';
-        tdFile.textContent = b.filename;
+        const fileNameSpan = document.createElement('span');
+        fileNameSpan.textContent = b.filename;
+        tdFile.appendChild(fileNameSpan);
+
+        const badgesRow = document.createElement('span');
+        badgesRow.className = 'backup-badges-row';
+        badgesRow.appendChild(createBadge(b.is_full ? 'Completo' : 'Parcial', b.is_full ? 'blue' : 'dim'));
+        if (b.has_dump) badgesRow.appendChild(createBadge('pg_dump ✓', 'blue'));
+        if (b.checksum_valid === true) badgesRow.appendChild(createBadge('SHA-256 ✓', 'green'));
+        if (b.checksum_valid === false) badgesRow.appendChild(createBadge('Corrompido', 'red'));
+        badgesRow.appendChild(createBadge(b.cloud_synced ? '☁️ Drive' : 'Só Local', b.cloud_synced ? 'green' : 'dim'));
+        tdFile.appendChild(badgesRow);
 
         const tdDate = document.createElement('td');
         tdDate.className = 'tabular';
@@ -1850,20 +1863,33 @@ document.addEventListener('DOMContentLoaded', () => {
         tdSize.style.textAlign = 'right';
         tdSize.style.fontFamily = 'var(--font-mono)';
         tdSize.className = 'tabular';
-        tdSize.textContent = `${b.size_kb} KB`;
+        tdSize.textContent = b.has_dump && !b.is_dump_only ? `${b.size_kb} + ${b.dump_size_kb} KB` : `${b.size_kb} KB`;
 
         const tdTables = document.createElement('td');
         tdTables.style.textAlign = 'right';
         tdTables.className = 'tabular';
-        tdTables.textContent = `${b.tables_count} tabelas (${b.total_records || 0} reg.)`;
+        tdTables.textContent = b.is_dump_only ? 'Binário pg_dump (DDL+Dados)' : `${b.tables_count} tabelas (${b.total_records || 0} reg.)`;
 
         const tdAction = document.createElement('td');
         tdAction.style.textAlign = 'center';
+        tdAction.style.display = 'flex';
+        tdAction.style.gap = '6px';
+        tdAction.style.justifyContent = 'center';
+
         const btnPrev = document.createElement('button');
         btnPrev.className = 'btn btn-secondary btn-sm';
-        btnPrev.textContent = 'Visualizar';
-        btnPrev.addEventListener('click', () => openBackupPreview(folderKey, b.filename));
+        btnPrev.textContent = b.is_dump_only ? 'Restaurar' : 'Visualizar';
+        btnPrev.addEventListener('click', () => openBackupPreview(folderKey, b));
         tdAction.appendChild(btnPrev);
+
+        if (!b.cloud_synced && state.currentUser?.perfil === 'ADMIN') {
+          const btnUp = document.createElement('button');
+          btnUp.className = 'btn btn-secondary btn-sm';
+          btnUp.textContent = '☁️ Enviar';
+          btnUp.title = 'Criptografar (AES-256-GCM) e enviar para o Google Drive';
+          btnUp.addEventListener('click', () => uploadSingleBackupToCloud(folderKey, b.filename, btnUp));
+          tdAction.appendChild(btnUp);
+        }
 
         tr.append(tdFile, tdDate, tdSize, tdTables, tdAction);
         tbody.appendChild(tr);
@@ -1907,16 +1933,22 @@ document.addEventListener('DOMContentLoaded', () => {
   const backupModal = document.getElementById('backup-modal');
   const backupPreviewContent = document.getElementById('backup-preview-content');
   const restoreConfirmBox = document.getElementById('restore-confirm-box');
+  const restoreModeGroup = document.getElementById('restore-mode-group');
+  const restoreModeSelect = document.getElementById('restore-mode-select');
   const chkRestoreConfirm = document.getElementById('chk-restore-confirm');
   const btnRestoreInit = document.getElementById('btn-restore-backup-init');
   const btnRestoreConfirm = document.getElementById('btn-restore-backup-confirm');
 
-  async function openBackupPreview(folder, filename) {
+  async function openBackupPreview(folder, backupItem) {
     if (!window.api) return;
-    state.activeBackupPreview = { folder, filename };
+    const item = typeof backupItem === 'string' ? { filename: backupItem, has_dump: false, is_dump_only: false } : backupItem;
+    const filename = item.filename;
+    state.activeBackupPreview = { folder, filename, has_dump: Boolean(item.has_dump), is_dump_only: Boolean(item.is_dump_only) };
     setText('backup-modal-title', `Snapshot: ${filename}`);
-    if (backupPreviewContent) backupPreviewContent.textContent = 'Carregando conteúdo mascarado...';
+    if (backupPreviewContent) backupPreviewContent.textContent = item.is_dump_only ? 'Arquivo binário pg_dump (-Fc) completo com DDL, constraints, triggers e dados.' : 'Carregando conteúdo mascarado...';
     if (restoreConfirmBox) restoreConfirmBox.style.display = 'none';
+    if (restoreModeGroup) restoreModeGroup.style.display = 'none';
+    if (restoreModeSelect) restoreModeSelect.value = item.has_dump ? 'dump' : 'json';
     if (chkRestoreConfirm) chkRestoreConfirm.checked = false;
     if (btnRestoreConfirm) {
       btnRestoreConfirm.style.display = 'none';
@@ -1926,6 +1958,8 @@ document.addEventListener('DOMContentLoaded', () => {
       btnRestoreInit.style.display = state.currentUser?.perfil === 'ADMIN' ? 'inline-flex' : 'none';
     }
     backupModal?.classList.add('active');
+
+    if (item.is_dump_only) return;
 
     const res = await window.api.previewBackup({ folder, filename });
     if (!res || !res.success) {
@@ -1943,8 +1977,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const dstLabel = state.activeBackupPreview.folder === 'prod' ? 'PRODUÇÃO (Coolify)' : 'LOCAL';
     setText(
       'restore-confirm-msg',
-      `Atenção: restaurar ${state.activeBackupPreview.filename} aplicará os registros no banco ${dstLabel} (um pré-backup automático será salvo antes).`
+      `Atenção: restaurar ${state.activeBackupPreview.filename} aplicará alterações no banco ${dstLabel} (um pré-backup automático em JSON + pg_dump será salvo antes).`
     );
+    if (restoreModeGroup) {
+      restoreModeGroup.style.display = (state.activeBackupPreview.has_dump && !state.activeBackupPreview.is_dump_only) ? 'block' : 'none';
+    }
     if (restoreConfirmBox) restoreConfirmBox.style.display = 'block';
     if (btnRestoreInit) btnRestoreInit.style.display = 'none';
     if (btnRestoreConfirm) btnRestoreConfirm.style.display = 'inline-flex';
@@ -1958,8 +1995,15 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!window.api || !state.activeBackupPreview) return;
     btnRestoreConfirm.disabled = true;
     btnRestoreConfirm.textContent = 'Restaurando...';
+    const mode = state.activeBackupPreview.is_dump_only
+      ? 'dump'
+      : (state.activeBackupPreview.has_dump ? (restoreModeSelect?.value || 'json') : 'json');
     try {
-      const res = await window.api.restoreBackup(state.activeBackupPreview);
+      const res = await window.api.restoreBackup({
+        folder: state.activeBackupPreview.folder,
+        filename: state.activeBackupPreview.filename,
+        mode
+      });
       if (res?.success) {
         showToast(
           `Snapshot restaurado! ${res.restored_rows} registros em ${res.tables_count} tabela(s). Pré-backup: ${res.safety_backup}`,
@@ -2206,7 +2250,14 @@ document.addEventListener('DOMContentLoaded', () => {
       'btn-save-scheduler',
       'btn-save-env',
       'btn-open-env-file',
-      'btn-run-analyze'
+      'btn-run-analyze',
+      'btn-snapshot-prod',
+      'btn-snapshot-local',
+      'btn-cloud-import-json',
+      'btn-cloud-save',
+      'btn-cloud-connect',
+      'btn-cloud-disconnect',
+      'btn-cloud-sync-all'
     ];
     adminControls.forEach((id) => {
       const el = document.getElementById(id);
@@ -2438,6 +2489,316 @@ document.addEventListener('DOMContentLoaded', () => {
       btnUpdateInstall.textContent = 'Aplicar e Reiniciar';
     }
   });
+
+  // ------------------------------------------------------------------------
+  // 13. Backup em Nuvem Criptografado (Google Drive Pessoal OAuth2)
+  // ------------------------------------------------------------------------
+  function applyCloudStatusUI(res) {
+    if (!res?.success) return;
+    const isAdmin = state.currentUser?.perfil === 'ADMIN';
+    const connected = Boolean(res.connected);
+    const connText = connected
+      ? (res.user_email ? `Conectado (${res.user_email})` : 'Conectado ao Drive')
+      : (res.has_client_config ? 'Credencial pronta (falta conectar)' : 'Não conectado');
+
+    ['cloud-conn-badge', 'settings-cloud-badge'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.className = `badge badge-${connected ? 'green' : (res.has_client_config ? 'amber' : 'dim')}`;
+      el.textContent = connText;
+    });
+
+    const quotaTxt = connected
+      ? `Pasta: ${res.root_folder_name || 'EcoSync_Backups'} • Cota usada: ${res.quota_used_gb ?? '--'} GB${res.quota_limit_gb ? ` / ${res.quota_limit_gb} GB` : ''} • ${res.uploaded_count || 0} snapshot(s) na nuvem`
+      : (res.remote_error || 'Configure OAuth2 abaixo e conecte sua conta Gmail para enviar snapshots criptografados.');
+    setText('cloud-quota-label', quotaTxt);
+
+    const elClientId = document.getElementById('cloud-client-id');
+    const elClientSecret = document.getElementById('cloud-client-secret');
+    const elRootFolder = document.getElementById('cloud-root-folder');
+    const elEncKey = document.getElementById('cloud-enc-key');
+    const chkAutoUp = document.getElementById('cloud-auto-upload');
+    const chkEnc = document.getElementById('cloud-encrypt');
+    const btnDisc = document.getElementById('btn-cloud-disconnect');
+
+    if (elClientId) { elClientId.value = res.client_id || ''; elClientId.disabled = !isAdmin; }
+    if (elClientSecret) {
+      elClientSecret.value = '';
+      elClientSecret.placeholder = res.client_secret_masked ? '•••••••• (salvo no DPAPI — preencha só para trocar)' : 'GOCSPX-...';
+      elClientSecret.disabled = !isAdmin;
+    }
+    if (elRootFolder) { elRootFolder.value = res.root_folder_name || 'EcoSync_Backups'; elRootFolder.disabled = !isAdmin; }
+    if (elEncKey) {
+      elEncKey.value = res.encryption_key || '';
+      elEncKey.placeholder = isAdmin ? '' : (res.encryption_key_masked || 'Restrito ao ADMIN');
+      elEncKey.disabled = !isAdmin;
+    }
+    if (chkAutoUp) { chkAutoUp.checked = res.auto_upload !== false; chkAutoUp.disabled = !isAdmin; }
+    if (chkEnc) { chkEnc.checked = res.encrypt_backups !== false; chkEnc.disabled = !isAdmin; }
+    if (btnDisc) btnDisc.style.display = (connected && isAdmin) ? 'inline-flex' : 'none';
+  }
+
+  async function loadCloudStatus(checkRemote = true) {
+    if (!window.api?.cloudStatus || !state.currentUser) return;
+    const res = await window.api.cloudStatus(checkRemote);
+    applyCloudStatusUI(res);
+  }
+
+  async function uploadSingleBackupToCloud(folder, filename, btnEl) {
+    if (!window.api?.cloudUpload) return;
+    if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Enviando...'; }
+    try {
+      const res = await window.api.cloudUpload({ folder, filename });
+      if (res?.success) {
+        showToast(`Backup enviado (${res.compressed_kb} KB${res.encrypted ? ', AES-256' : ''}): ${res.cloud_name}`, 'success');
+        loadBackups();
+        loadCloudStatus(false);
+        loadAuditLogs();
+      } else {
+        showToast(res?.error || 'Falha ao enviar backup para o Google Drive.', 'error');
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = '☁️ Enviar'; }
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+      if (btnEl) { btnEl.disabled = false; btnEl.textContent = '☁️ Enviar'; }
+    }
+  }
+
+  async function loadCloudVaultList() {
+    if (!window.api?.cloudList) return;
+    const tbody = document.getElementById('tbody-cloud-vault');
+    if (!tbody) return;
+    clearElement(tbody);
+
+    const trLoading = document.createElement('tr');
+    const tdLoading = document.createElement('td');
+    tdLoading.colSpan = 5;
+    tdLoading.style.textAlign = 'center';
+    tdLoading.style.padding = '16px';
+    tdLoading.style.color = 'var(--text-muted)';
+    tdLoading.textContent = 'Consultando arquivos no Google Drive...';
+    trLoading.appendChild(tdLoading);
+    tbody.appendChild(trLoading);
+
+    const res = await window.api.cloudList();
+    clearElement(tbody);
+
+    if (!res?.success) {
+      const trErr = document.createElement('tr');
+      const tdErr = document.createElement('td');
+      tdErr.colSpan = 5;
+      tdErr.style.textAlign = 'center';
+      tdErr.style.padding = '16px';
+      tdErr.style.color = 'var(--accent-red)';
+      tdErr.textContent = res?.error || 'Não foi possível listar o Google Drive.';
+      trErr.appendChild(tdErr);
+      tbody.appendChild(trErr);
+      return;
+    }
+
+    const files = res.files || [];
+    if (files.length === 0) {
+      const trEmpty = document.createElement('tr');
+      const tdEmpty = document.createElement('td');
+      tdEmpty.colSpan = 5;
+      tdEmpty.style.textAlign = 'center';
+      tdEmpty.style.padding = '16px';
+      tdEmpty.style.color = 'var(--text-dim)';
+      tdEmpty.textContent = 'Nenhum backup encontrado na pasta EcoSync_Backups do Drive.';
+      trEmpty.appendChild(tdEmpty);
+      tbody.appendChild(trEmpty);
+      return;
+    }
+
+    files.forEach((f) => {
+      const tr = document.createElement('tr');
+
+      const tdName = document.createElement('td');
+      tdName.style.fontFamily = 'var(--font-mono)';
+      tdName.style.fontSize = '12px';
+      tdName.textContent = f.cloud_name;
+      if (f.kind === 'dump') {
+        const kd = createBadge('pg_dump', 'blue');
+        kd.style.marginLeft = '6px';
+        tdName.appendChild(kd);
+      }
+      if (f.encrypted) {
+        const b = createBadge('AES-256', 'green');
+        b.style.marginLeft = '6px';
+        tdName.appendChild(b);
+      }
+
+      const tdEnv = document.createElement('td');
+      tdEnv.textContent = `${(f.env || 'prod').toUpperCase()} • ${f.month || '--'}`;
+
+      const tdDate = document.createElement('td');
+      tdDate.className = 'tabular';
+      tdDate.textContent = f.created_at ? formatTime(f.created_at) : '--';
+
+      const tdSize = document.createElement('td');
+      tdSize.style.textAlign = 'right';
+      tdSize.style.fontFamily = 'var(--font-mono)';
+      tdSize.textContent = `${f.size_kb} KB`;
+
+      const tdAct = document.createElement('td');
+      tdAct.style.textAlign = 'center';
+      const btnDl = document.createElement('button');
+      btnDl.className = 'btn btn-secondary btn-sm';
+      btnDl.textContent = 'Baixar & Descriptografar';
+      btnDl.disabled = state.currentUser?.perfil !== 'ADMIN';
+      btnDl.addEventListener('click', async () => {
+        btnDl.disabled = true;
+        btnDl.textContent = 'Baixando...';
+        const dlRes = await window.api.cloudDownload({ driveId: f.drive_id, folder: f.env === 'local' ? 'local' : 'prod' });
+        if (dlRes?.success) {
+          showToast(`Snapshot recuperado e descriptografado: ${dlRes.filename}`, 'success');
+          loadBackups();
+          loadAuditLogs();
+        } else {
+          showToast(dlRes?.error || 'Falha ao baixar/descriptografar backup.', 'error');
+        }
+        btnDl.disabled = state.currentUser?.perfil !== 'ADMIN';
+        btnDl.textContent = 'Baixar & Descriptografar';
+      });
+      tdAct.appendChild(btnDl);
+
+      tr.append(tdName, tdEnv, tdDate, tdSize, tdAct);
+      tbody.appendChild(tr);
+    });
+  }
+
+  document.getElementById('btn-cloud-import-json')?.addEventListener('click', async () => {
+    if (!window.api?.cloudImportJson) return;
+    const res = await window.api.cloudImportJson();
+    if (res?.canceled) return;
+    if (res?.success) {
+      applyCloudStatusUI(res);
+      showToast('Credencial JSON do Google Cloud importada com proteção DPAPI!', 'success');
+    } else {
+      showToast(res?.error || 'Falha ao importar JSON.', 'error');
+    }
+  });
+
+  document.getElementById('btn-cloud-save')?.addEventListener('click', async () => {
+    if (!window.api?.cloudSave) return;
+    const payload = {
+      client_id: document.getElementById('cloud-client-id')?.value.trim() || '',
+      client_secret: document.getElementById('cloud-client-secret')?.value.trim() || '',
+      root_folder_name: document.getElementById('cloud-root-folder')?.value.trim() || 'EcoSync_Backups',
+      encryption_key: document.getElementById('cloud-enc-key')?.value.trim() || '',
+      auto_upload: Boolean(document.getElementById('cloud-auto-upload')?.checked),
+      encrypt_backups: Boolean(document.getElementById('cloud-encrypt')?.checked)
+    };
+    const res = await window.api.cloudSave(payload);
+    if (res?.success) {
+      applyCloudStatusUI(res);
+      showToast('Configurações de nuvem e criptografia salvas com DPAPI!', 'success');
+    } else {
+      showToast(res?.error || 'Erro ao salvar configuração de nuvem.', 'error');
+    }
+  });
+
+  document.getElementById('btn-cloud-connect')?.addEventListener('click', async () => {
+    if (!window.api?.cloudConnect) return;
+    const btn = document.getElementById('btn-cloud-connect');
+    if (btn) { btn.disabled = true; btn.textContent = 'Aguardando autorização no navegador...'; }
+    showToast('Abrindo navegador para autorizar acesso seguro (drive.file)...', 'info');
+    try {
+      const res = await window.api.cloudConnect();
+      if (res?.success && res.connected) {
+        applyCloudStatusUI(res);
+        showToast(`Google Drive conectado (${res.user_email || 'Conta Pessoal'})!`, 'success');
+        loadAuditLogs();
+      } else {
+        showToast(res?.error || 'Falha ao conectar ao Google Drive.', 'error');
+      }
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Conectar Conta Google (OAuth2)'; }
+    }
+  });
+
+  document.getElementById('btn-cloud-disconnect')?.addEventListener('click', async () => {
+    if (!window.api?.cloudDisconnect) return;
+    const res = await window.api.cloudDisconnect();
+    if (res?.success) {
+      showToast('Conta Google desconectada.', 'info');
+      loadCloudStatus(false);
+      loadAuditLogs();
+    }
+  });
+
+  document.getElementById('btn-copy-enc-key')?.addEventListener('click', async () => {
+    const val = document.getElementById('cloud-enc-key')?.value || '';
+    if (!val) {
+      showToast('Chave restrita ou vazia.', 'error');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(val);
+      showToast('Chave AES-256 copiada! Guarde em local seguro fora deste PC.', 'success');
+    } catch {
+      showToast('Não foi possível copiar automaticamente; clique no ícone de olho para copiar.', 'info');
+    }
+  });
+
+  document.getElementById('btn-cloud-sync-all')?.addEventListener('click', async () => {
+    if (!window.api?.cloudSyncAll) return;
+    const btn = document.getElementById('btn-cloud-sync-all');
+    if (btn) { btn.disabled = true; btn.textContent = 'Sincronizando...'; }
+    try {
+      const res = await window.api.cloudSyncAll();
+      if (res?.uploaded_count > 0) {
+        showToast(`${res.uploaded_count} backup(s) criptografado(s) e enviado(s) para o Google Drive!`, 'success');
+      } else if (res?.errors?.length) {
+        showToast(res.errors[0], 'error');
+      } else {
+        showToast('Todos os backups locais já estão sincronizados no Google Drive.', 'info');
+      }
+      loadBackups();
+      loadCloudStatus(true);
+      loadAuditLogs();
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Enviar Pendentes ao Drive'; }
+    }
+  });
+
+  document.getElementById('btn-cloud-list-toggle')?.addEventListener('click', () => {
+    const card = document.getElementById('cloud-vault-card');
+    if (!card) return;
+    const visible = card.style.display !== 'none';
+    card.style.display = visible ? 'none' : 'block';
+    if (!visible) loadCloudVaultList();
+  });
+
+  async function runManualSnapshot(target, btnEl, defaultLabel) {
+    if (!window.api?.createSnapshot) return;
+    if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Gerando Snapshot...'; }
+    try {
+      const res = await window.api.createSnapshot(target);
+      if (res?.success) {
+        const dumpTxt = res.dump_created ? ' + pg_dump ✓' : '';
+        const cloudTxt = res.cloud_uploaded ? ' • Enviado ao Drive ☁️' : '';
+        showToast(`Snapshot ${target.toUpperCase()} (${res.tables_count} tabelas, ${res.total_rows} reg.${dumpTxt})${cloudTxt}`, 'success');
+        loadBackups();
+        loadBackupsSummary();
+        loadCloudStatus(false);
+        loadAuditLogs();
+      } else {
+        showToast(res?.error || 'Falha ao gerar snapshot.', 'error');
+      }
+    } finally {
+      if (btnEl) { btnEl.disabled = false; btnEl.textContent = defaultLabel; }
+    }
+  }
+
+  document.getElementById('btn-snapshot-prod')?.addEventListener('click', (e) => {
+    runManualSnapshot('prod', e.currentTarget, 'Snapshot Produção (Full)');
+  });
+  document.getElementById('btn-snapshot-local')?.addEventListener('click', (e) => {
+    runManualSnapshot('local', e.currentTarget, 'Snapshot Local (Full)');
+  });
+
+  document.getElementById('btn-cloud-refresh-list')?.addEventListener('click', () => loadCloudVaultList());
 
   loadAppInfo();
   initSessionGate();

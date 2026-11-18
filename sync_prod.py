@@ -378,18 +378,79 @@ def reset_sequences(cur, table: str, columns: list) -> None:
         ).format(c=sql.Identifier(col), t=sql.Identifier(table)), (seq,))
 
 
-def write_backup(diffs: list, backup_dir: Path, prefix: str) -> Path:
+def write_backup(diffs: list, backup_dir: Path, prefix: str, dcur=None, dst_url: str | None = None) -> Path:
+    import hashlib
     backup_dir.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     path = backup_dir / f"{prefix}_backup_{stamp}.json"
-    payload = {}
-    for info in diffs:
-        if not (info["upserts"] or info["deletes"]):
-            continue
-        snapshot = info.get("dst_snapshot", {})
-        payload[info["table"]] = [dict(zip(info["columns"], row)) for row in snapshot.values()]
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=json_default),
-                    encoding="utf-8")
+    tables_payload = {}
+
+    snap_conn = None
+    snap_cur = dcur
+    if dst_url:
+        try:
+            snap_conn = connect(dst_url, prefix.upper())
+            snap_conn.set_session(isolation_level="REPEATABLE READ", readonly=True)
+            snap_cur = snap_conn.cursor()
+        except Exception:
+            snap_cur = dcur
+
+    if snap_cur is not None:
+        try:
+            for tbl in topo_sort(list_tables(snap_cur), get_fk_dependencies(snap_cur)):
+                cols = [c[0] for c in get_columns(snap_cur, tbl)]
+                pk = get_primary_key(snap_cur, tbl)
+                if not pk:
+                    continue
+                snap = fetch_rows(snap_cur, tbl, cols, pk)
+                tables_payload[tbl] = [dict(zip(cols, row)) for row in snap.values()]
+        except Exception:
+            tables_payload = {}
+
+    if snap_conn is not None:
+        try:
+            snap_cur.close()
+            snap_conn.close()
+        except Exception:
+            pass
+
+    full_snapshot = bool(tables_payload)
+    if not tables_payload:
+        for info in diffs:
+            if not (info["upserts"] or info["deletes"]):
+                continue
+            snapshot = info.get("dst_snapshot", {})
+            tables_payload[info["table"]] = [dict(zip(info["columns"], row)) for row in snapshot.values()]
+
+    normalized = json.loads(json.dumps(tables_payload, ensure_ascii=False, default=json_default))
+    canonical = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    total_rows = sum(len(rows) for rows in normalized.values() if isinstance(rows, list))
+
+    dump_info = None
+    if dst_url:
+        try:
+            import backup_cloud
+            d_res = backup_cloud.create_pg_dump(dst_url, path.with_suffix(".dump"))
+            if d_res.get("success"):
+                dump_info = {"file": d_res["filename"], "sha256": d_res["sha256"], "size_kb": d_res["size_kb"]}
+        except Exception:
+            dump_info = None
+
+    wrapped = {
+        "meta": {
+            "format": "ecosync_backup_v2",
+            "created_at": dt.datetime.now().isoformat(),
+            "environment": prefix,
+            "full_snapshot": full_snapshot,
+            "isolation": "REPEATABLE READ" if snap_conn is not None else "READ COMMITTED",
+            "tables_count": len(normalized),
+            "total_rows": total_rows,
+            "sha256": hashlib.sha256(canonical).hexdigest(),
+            "pg_dump": dump_info,
+        },
+        "tables": normalized,
+    }
+    path.write_text(json.dumps(wrapped, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
 
 
@@ -645,12 +706,29 @@ def main() -> None:
                 print("🚫 Operação cancelada. Nenhuma alteração foi feita.")
                 return
 
-        backup_path = write_backup(diffs, backup_dir, backup_prefix)
+        backup_path = write_backup(diffs, backup_dir, backup_prefix, dcur=dcur, dst_url=dst_url)
         try:
             rel_backup = backup_path.relative_to(ROOT)
         except ValueError:
             rel_backup = backup_path
-        print(f"\n💾 Backup das tabelas afetadas ({dst_label}): {rel_backup}")
+        print(f"\n💾 Backup completo (REPEATABLE READ): {rel_backup}")
+        if backup_path.with_suffix(".dump").exists():
+            print(f"📦 Backup binário pg_dump (DDL+Dados): {backup_path.with_suffix('.dump').name}")
+
+        try:
+            import backup_cloud
+            secrets = backup_cloud.load_cloud_secrets(ROOT)
+            has_creds = bool(secrets.get("token_info") or secrets.get("service_account_info"))
+            if secrets.get("auto_upload", True) and has_creds:
+                up = backup_cloud.upload_backup_file(ROOT, backup_prefix, backup_path.name)
+                if up.get("success"):
+                    enc_txt = "AES-256-GCM" if up.get("encrypted") else "Gzip"
+                    dump_note = f" + {up.get('dump_cloud_name')}" if up.get("dump_uploaded") else ""
+                    print(f"☁️  Snapshot enviado ao Google Drive ({enc_txt}, {up.get('compressed_kb')} KB): {up.get('cloud_name')}{dump_note}")
+                else:
+                    print(f"⚠️  Aviso no upload para nuvem (sync continuará): {up.get('error')}")
+        except Exception as cloud_exc:
+            print(f"⚠️  Aviso ao enviar backup ao Google Drive: {cloud_exc}")
 
         # 3. Aplica tudo em uma única transação no destino
         for desc, stmt in schema_actions:

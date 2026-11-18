@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, Tray, Menu, Notification, safeStorage, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Tray, Menu, Notification, safeStorage, nativeImage, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -246,6 +246,13 @@ function runPythonBridge(args, stdinObj = null) {
         try {
           resolve(JSON.parse(stdout));
         } catch {
+          const jsonIdx = stdout.search(/(^|\r?\n)\s*\{/);
+          if (jsonIdx !== -1) {
+            try {
+              resolve(JSON.parse(stdout.slice(jsonIdx).trim()));
+              return;
+            } catch { }
+          }
           resolve({ success: false, error: 'Resposta JSON inválida do backend Python.' });
         }
       } else {
@@ -803,15 +810,32 @@ ipcMain.handle('restore-backup', async (_event, params = {}) => {
   if (denied) return denied;
   const folder = params?.folder === 'local' ? 'local' : (params?.folder === 'prod' ? 'prod' : '');
   const filename = typeof params?.filename === 'string' ? params.filename : '';
-  if (!folder || !/^[a-zA-Z0-9_.-]+\.json$/.test(filename)) {
+  const mode = params?.mode === 'dump' ? 'dump' : 'json';
+  if (!folder || !/^[a-zA-Z0-9_.-]+\.(json|dump)$/.test(filename)) {
     return { success: false, error: 'Parâmetros de backup inválidos.' };
   }
   const startedAt = Date.now();
-  const res = await runPythonBridge(['restore', folder, filename]);
+  const res = await runPythonBridge(['restore', folder, filename, mode]);
   appendAuditLog({
     action: 'backup_restore',
     direction: folder,
-    mode: filename,
+    mode: `${mode}:${filename}`,
+    success: Boolean(res?.success),
+    durationMs: Date.now() - startedAt
+  });
+  return res;
+});
+
+ipcMain.handle('create-snapshot', async (_event, target = 'prod') => {
+  const denied = requireAuth(['ADMIN']);
+  if (denied) return denied;
+  const safeTarget = target === 'local' ? 'local' : 'prod';
+  const startedAt = Date.now();
+  const res = await runPythonBridge(['snapshot', safeTarget]);
+  appendAuditLog({
+    action: 'snapshot_full',
+    direction: safeTarget,
+    mode: res.dump_created ? 'JSON + pg_dump' : 'JSON REPEATABLE READ',
     success: Boolean(res?.success),
     durationMs: Date.now() - startedAt
   });
@@ -1156,5 +1180,114 @@ ipcMain.handle('install-update', async () => {
     success: Boolean(res.success),
     error: res.error || null
   });
+  return res;
+});
+
+// --------------------------------------------------------------------------
+// IPC Handlers - Backup em Nuvem Criptografado (Google Drive OAuth2 & SA)
+// --------------------------------------------------------------------------
+ipcMain.handle('cloud-status', async (_event, checkRemote = false) => {
+  const denied = requireAuth();
+  if (denied) return denied;
+  const args = ['cloud-status'];
+  if (checkRemote) args.push('--check');
+  if (currentSession?.perfil === 'ADMIN') args.push('--sensitive');
+  return runPythonBridge(args);
+});
+
+ipcMain.handle('cloud-import-json', async () => {
+  const denied = requireAuth(['ADMIN']);
+  if (denied) return denied;
+  const pick = await dialog.showOpenDialog(mainWindow, {
+    title: 'Selecionar Credencial JSON do Google Cloud',
+    properties: ['openFile'],
+    filters: [{ name: 'Arquivos JSON', extensions: ['json'] }]
+  });
+  if (pick.canceled || !pick.filePaths?.[0]) {
+    return { success: false, canceled: true };
+  }
+  try {
+    const stat = fs.statSync(pick.filePaths[0]);
+    if (stat.size > 1024 * 1024) {
+      return { success: false, error: 'Arquivo JSON muito grande.' };
+    }
+    const raw = fs.readFileSync(pick.filePaths[0], 'utf-8');
+    const parsed = JSON.parse(raw);
+    const payload = parsed?.type === 'service_account'
+      ? { service_account_json_raw: raw }
+      : { oauth_json_raw: raw };
+    const res = await runPythonBridge(['cloud-save'], payload);
+    appendAuditLog({ action: 'cloud_import_json', mode: res.auth_mode || 'oauth2', success: Boolean(res.success) });
+    return res;
+  } catch (err) {
+    return { success: false, error: 'Erro ao importar JSON Google: ' + err.message };
+  }
+});
+
+ipcMain.handle('cloud-save', async (_event, config = {}) => {
+  const denied = requireAuth(['ADMIN']);
+  if (denied) return denied;
+  const res = await runPythonBridge(['cloud-save'], config || {});
+  appendAuditLog({ action: 'cloud_config_saved', mode: res.auth_mode || 'oauth2', success: Boolean(res.success) });
+  return res;
+});
+
+ipcMain.handle('cloud-connect', async () => {
+  const denied = requireAuth(['ADMIN']);
+  if (denied) return denied;
+  const res = await runPythonBridge(['cloud-connect']);
+  appendAuditLog({ action: 'cloud_connect', mode: res.user_email || res.auth_mode || 'oauth2', success: Boolean(res.success) });
+  return res;
+});
+
+ipcMain.handle('cloud-disconnect', async () => {
+  const denied = requireAuth(['ADMIN']);
+  if (denied) return denied;
+  const res = await runPythonBridge(['cloud-disconnect']);
+  appendAuditLog({ action: 'cloud_disconnect', success: Boolean(res.success) });
+  return res;
+});
+
+ipcMain.handle('cloud-upload', async (_event, params = {}) => {
+  const denied = requireAuth(['ADMIN']);
+  if (denied) return denied;
+  const folder = params?.folder === 'local' ? 'local' : (params?.folder === 'prod' ? 'prod' : '');
+  const filename = typeof params?.filename === 'string' ? params.filename : '';
+  if (!folder || !/^[a-zA-Z0-9_.-]+\.json$/.test(filename)) {
+    return { success: false, error: 'Parâmetros de backup inválidos.' };
+  }
+  const res = await runPythonBridge(['cloud-upload', folder, filename]);
+  appendAuditLog({ action: 'cloud_upload', direction: folder, mode: filename, success: Boolean(res.success) });
+  return res;
+});
+
+ipcMain.handle('cloud-sync-all', async () => {
+  const denied = requireAuth(['ADMIN']);
+  if (denied) return denied;
+  const startedAt = Date.now();
+  const res = await runPythonBridge(['cloud-sync-all']);
+  appendAuditLog({
+    action: 'cloud_sync_all',
+    mode: `${res.uploaded_count || 0} arquivo(s)`,
+    success: Boolean(res.success),
+    durationMs: Date.now() - startedAt
+  });
+  return res;
+});
+
+ipcMain.handle('cloud-list', async () => requireAuth() || runPythonBridge(['cloud-list']));
+
+ipcMain.handle('cloud-download', async (_event, params = {}) => {
+  const denied = requireAuth(['ADMIN']);
+  if (denied) return denied;
+  const driveId = typeof params?.driveId === 'string' ? params.driveId.trim() : '';
+  const folder = params?.folder === 'local' ? 'local' : 'prod';
+  if (!/^[a-zA-Z0-9_-]+$/.test(driveId)) {
+    return { success: false, error: 'ID do arquivo no Drive inválido.' };
+  }
+  const res = await runPythonBridge(['cloud-download', driveId, folder], {
+    recovery_key: typeof params?.recoveryKey === 'string' ? params.recoveryKey : ''
+  });
+  appendAuditLog({ action: 'cloud_download', direction: folder, mode: res.filename || driveId, success: Boolean(res.success) });
   return res;
 });

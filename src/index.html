@@ -81,7 +81,7 @@
         <div class="bot-identity-info">
           <div class="bot-identity-name">EcoSync Bot</div>
           <div class="bot-mood-badge" id="bot-mood-badge">Iniciando...</div>
-          <div class="bot-version-line" id="bot-version-tag">v1.2.0</div>
+          <div class="bot-version-line" id="bot-version-tag">v1.3.0</div>
         </div>
       </div>
 
@@ -727,6 +727,12 @@
             <p class="page-subtitle">Snapshots JSON gerados antes de cada alteração e registro imutável de ações.</p>
           </div>
           <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button class="btn btn-primary" id="btn-snapshot-prod" title="Gera snapshot completo consistente (REPEATABLE READ + pg_dump -Fc) de Produção e envia para o Drive">
+              Snapshot Produção (Full)
+            </button>
+            <button class="btn btn-secondary" id="btn-snapshot-local" title="Gera snapshot completo consistente (REPEATABLE READ + pg_dump -Fc) Local e envia para o Drive">
+              Snapshot Local (Full)
+            </button>
             <button class="btn btn-secondary" id="btn-cleanup-backups" title="Remove snapshots antigos preservando os 10 mais recentes de cada pasta">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path></svg>
               Limpar Antigos (Manter 10)
@@ -744,6 +750,47 @@
               logs/
             </button>
           </div>
+        </div>
+
+        <div class="cloud-banner-card" id="cloud-status-banner">
+          <div>
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
+              <strong style="font-size: 14px; color: #f8fafc;">Camada Nuvem • Google Drive Criptografado (AES-256-GCM)</strong>
+              <span class="badge badge-dim" id="cloud-conn-badge">Não conectado</span>
+            </div>
+            <div style="font-size: 12px; color: var(--text-muted);" id="cloud-quota-label">
+              Configure suas credenciais OAuth2 em Configurações (.env) para enviar backups compactados (.json.gz.enc) ao Drive.
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button class="btn btn-secondary btn-sm" id="btn-cloud-sync-all">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 16 12 12 8 16"></polyline><line x1="12" y1="12" x2="12" y2="21"></line><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path></svg>
+              Enviar Pendentes ao Drive
+            </button>
+            <button class="btn btn-primary btn-sm" id="btn-cloud-list-toggle">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path></svg>
+              Cofre no Drive
+            </button>
+          </div>
+        </div>
+
+        <div class="data-card" id="cloud-vault-card" style="display: none;">
+          <div class="data-card-header">
+            <div class="data-card-title">Arquivos no Google Drive (EcoSync_Backups)</div>
+            <button class="btn btn-secondary btn-sm" id="btn-cloud-refresh-list">Atualizar Lista</button>
+          </div>
+          <table class="custom-table">
+            <thead>
+              <tr>
+                <th>Arquivo na Nuvem</th>
+                <th>Ambiente / Mês</th>
+                <th>Data (UTC)</th>
+                <th style="text-align: right;">Tamanho</th>
+                <th style="text-align: center;">Recuperação</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-cloud-vault"></tbody>
+          </table>
         </div>
 
         <div class="data-card">
@@ -918,6 +965,88 @@
             </button>
           </div>
         </div>
+
+        <!-- Card de Backup em Nuvem (Google Drive Pessoal OAuth2 + Criptografia AES-256-GCM) -->
+        <div class="data-card" style="padding: 24px; margin-top: 18px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap;">
+            <div>
+              <h2 style="font-size: 16px; color: #f8fafc; margin: 0;">Backup em Nuvem • Google Drive (Conta Pessoal OAuth2)</h2>
+              <p style="font-size: 12px; color: var(--text-muted); margin: 4px 0 0;">Compressão Gzip + Criptografia Zero-Knowledge AES-256-GCM + Tokens protegidos por Windows DPAPI.</p>
+            </div>
+            <span class="badge badge-dim" id="settings-cloud-badge">Não conectado</span>
+          </div>
+
+          <div class="cloud-guide-box">
+            <strong>Como gerar seu OAuth Client ID (1x, grátis no Gmail pessoal):</strong>
+            1) Acesse <code>console.cloud.google.com</code> e crie um projeto &rarr; ative a <strong>Google Drive API</strong>.<br>
+            2) Em <strong>Tela de permissão OAuth</strong> (Externo), adicione o seu Gmail em <strong>Usuários de teste</strong>.<br>
+            3) Em <strong>Credenciais &rarr; Criar ID do cliente OAuth &rarr; App para computador (Desktop)</strong>, baixe o <code>.json</code> e importe abaixo (ou cole Client ID e Secret).
+          </div>
+
+          <div style="display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap;">
+            <button type="button" class="btn btn-secondary" id="btn-cloud-import-json">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+              Importar JSON do Google Cloud (.json)
+            </button>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+            <div class="form-group">
+              <label class="form-label" for="cloud-client-id">Google OAuth Client ID</label>
+              <input type="text" id="cloud-client-id" class="form-input" placeholder="xxxxx.apps.googleusercontent.com" autocomplete="off">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="cloud-client-secret">Google OAuth Client Secret</label>
+              <div class="input-secret-wrap">
+                <input type="password" id="cloud-client-secret" class="form-input" placeholder="GOCSPX-..." autocomplete="off">
+                <button type="button" class="btn-eye" data-target="cloud-client-secret" title="Mostrar / Ocultar secret">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+            <div class="form-group">
+              <label class="form-label" for="cloud-root-folder">Pasta Raiz no Google Drive</label>
+              <input type="text" id="cloud-root-folder" class="form-input" value="EcoSync_Backups">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="cloud-enc-key">
+                <span>Chave Mestra AES-256 (Guarde fora deste PC para recuperar em outra máquina)</span>
+              </label>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <div class="input-secret-wrap" style="flex: 1;">
+                  <input type="password" id="cloud-enc-key" class="form-input" autocomplete="off">
+                  <button type="button" class="btn-eye" data-target="cloud-enc-key" title="Mostrar / Ocultar chave">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                  </button>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-copy-enc-key" title="Copiar chave de recuperação">Copiar</button>
+              </div>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 20px; flex-wrap: wrap; margin: 6px 0 16px;">
+            <label class="safety-check-label">
+              <input type="checkbox" id="cloud-auto-upload" checked>
+              <span>Enviar automaticamente para o Google Drive após cada backup</span>
+            </label>
+            <label class="safety-check-label">
+              <input type="checkbox" id="cloud-encrypt" checked>
+              <span>Criptografar backups localmente (AES-256-GCM + Gzip) antes do upload</span>
+            </label>
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap;">
+            <button type="button" class="btn btn-secondary" id="btn-cloud-disconnect" style="display: none;">Desconectar Conta</button>
+            <button type="button" class="btn btn-secondary" id="btn-cloud-save">Salvar Config Nuvem</button>
+            <button type="button" class="btn btn-primary" id="btn-cloud-connect">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path></svg>
+              Conectar Conta Google (OAuth2)
+            </button>
+          </div>
+        </div>
       </section>
 
 
@@ -1028,6 +1157,13 @@
         <div class="restore-confirm-box" id="restore-confirm-box" style="display: none;">
           <div style="font-size: 12.5px; color: #fde68a; margin-bottom: 8px;" id="restore-confirm-msg">
             Atenção: restaurar este snapshot gravará os registros no banco de destino (um pré-backup automático será salvo antes).
+          </div>
+          <div class="form-group" id="restore-mode-group" style="display: none; margin-bottom: 10px;">
+            <label class="form-label" for="restore-mode-select">Modo de Restauração</label>
+            <select id="restore-mode-select" class="form-input">
+              <option value="json">Dados via JSON UPSERT (mantém estrutura e registros novos)</option>
+              <option value="dump">Restauração Completa via pg_restore (recria DDL + triggers + todos os dados)</option>
+            </select>
           </div>
           <label class="safety-check-label">
             <input type="checkbox" id="chk-restore-confirm">

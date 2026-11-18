@@ -1914,3 +1914,38 @@ input:checked + .slider:before {
   transition: width 0.2s ease;
 }
 
+/* ============================================================
+   CLOUD BACKUP (GOOGLE DRIVE + AES-256-GCM)
+============================================================ */
+.cloud-banner-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 16px 20px;
+  margin-bottom: 18px;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(59, 130, 246, 0.08));
+  border: 1px solid rgba(59, 130, 246, 0.28);
+}
+
+.cloud-guide-box {
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.55;
+  margin-bottom: 16px;
+}
+
+.backup-badges-row {
+  display: inline-flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+

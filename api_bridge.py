@@ -22,6 +22,7 @@ _DEFAULT_ROOT = Path(sys.executable).resolve().parent if getattr(sys, "frozen", 
 ROOT = Path(os.environ["ECOSYNC_DATA_DIR"]).resolve() if os.environ.get("ECOSYNC_DATA_DIR") else _DEFAULT_ROOT
 
 import sync_prod
+import backup_cloud
 
 SENSITIVE_KEYS = {"senha", "password", "hash", "token", "secret", "jwt_secret"}
 
@@ -510,13 +511,15 @@ def get_diff(direction: str = "push", no_delete: bool = False, tables_filter: st
 
 
 def get_backups() -> dict:
-    """Lista os backups existentes nas pastas backups_prod e backups_local."""
+    """Lista os backups existentes nas pastas backups_prod e backups_local com status de integridade, pg_dump e nuvem."""
     result = {"prod": [], "local": []}
+    cloud_idx = backup_cloud.load_cloud_index(ROOT).get("uploaded", {})
 
     for key, folder_name in (("prod", "backups_prod"), ("local", "backups_local")):
         bdir = ROOT / folder_name
         if not bdir.exists():
             continue
+        seen_dumps = set()
         for p in sorted(bdir.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True):
             stat = p.stat()
             size_kb = round(stat.st_size / 1024, 2)
@@ -524,14 +527,26 @@ def get_backups() -> dict:
 
             tables_included = []
             total_records = 0
+            is_full = False
+            checksum_valid = None
             try:
-                data = json.loads(p.read_text(encoding="utf-8"))
-                if isinstance(data, dict):
-                    tables_included = list(data.keys())
-                    total_records = sum(len(rows) for rows in data.values() if isinstance(rows, list))
+                raw_data = json.loads(p.read_text(encoding="utf-8"))
+                tables_map, _meta = backup_cloud.extract_backup_tables(raw_data)
+                integrity = backup_cloud.verify_backup_integrity(raw_data)
+                is_full = bool(integrity.get("is_full"))
+                checksum_valid = integrity.get("valid")
+                tables_included = list(tables_map.keys())
+                total_records = sum(len(rows) for rows in tables_map.values() if isinstance(rows, list))
             except Exception:
                 pass
 
+            dump_pair = p.with_suffix(".dump")
+            has_dump = dump_pair.exists()
+            if has_dump:
+                seen_dumps.add(dump_pair.name)
+
+            cloud_entry = cloud_idx.get(f"{key}/{p.name}")
+            cloud_dump_entry = cloud_idx.get(f"{key}/{dump_pair.name}") if has_dump else None
             result[key].append({
                 "filename": p.name,
                 "folder": key,
@@ -540,9 +555,49 @@ def get_backups() -> dict:
                 "tables_count": len(tables_included),
                 "total_records": total_records,
                 "tables": tables_included[:8],
+                "is_full": is_full,
+                "checksum_valid": checksum_valid,
+                "has_dump": has_dump,
+                "dump_filename": dump_pair.name if has_dump else None,
+                "dump_size_kb": round(dump_pair.stat().st_size / 1024, 2) if has_dump else 0,
+                "cloud_synced": bool(cloud_entry),
+                "cloud_dump_synced": bool(cloud_dump_entry),
+                "cloud_encrypted": bool(cloud_entry.get("encrypted")) if cloud_entry else False,
             })
 
-    return {"success": True, "backups": result}
+        # Lista arquivos .dump avulsos (ex.: baixados do Drive sem .json correspondente)
+        for dp in sorted(bdir.glob("*.dump"), key=lambda f: f.stat().st_mtime, reverse=True):
+            if dp.name in seen_dumps:
+                continue
+            stat = dp.stat()
+            cloud_dump_entry = cloud_idx.get(f"{key}/{dp.name}")
+            result[key].append({
+                "filename": dp.name,
+                "folder": key,
+                "size_kb": round(stat.st_size / 1024, 2),
+                "date": dt.datetime.fromtimestamp(stat.st_mtime).strftime("%d/%m/%Y %H:%M:%S"),
+                "tables_count": 0,
+                "total_records": 0,
+                "tables": [],
+                "is_full": True,
+                "checksum_valid": None,
+                "has_dump": True,
+                "is_dump_only": True,
+                "dump_filename": dp.name,
+                "dump_size_kb": round(stat.st_size / 1024, 2),
+                "cloud_synced": bool(cloud_dump_entry),
+                "cloud_dump_synced": bool(cloud_dump_entry),
+                "cloud_encrypted": bool(cloud_dump_entry.get("encrypted")) if cloud_dump_entry else False,
+            })
+
+    return {
+        "success": True,
+        "pg_tools": {
+            "pg_dump": bool(backup_cloud.find_pg_tool("pg_dump")),
+            "pg_restore": bool(backup_cloud.find_pg_tool("pg_restore")),
+        },
+        "backups": result,
+    }
 
 
 def preview_backup(folder: str, filename: str) -> dict:
@@ -562,8 +617,9 @@ def preview_backup(folder: str, filename: str) -> dict:
 
     try:
         raw = json.loads(target.read_text(encoding="utf-8"))
+        tables_map, _meta = backup_cloud.extract_backup_tables(raw)
         summary = []
-        for tbl, rows in raw.items():
+        for tbl, rows in tables_map.items():
             if not isinstance(rows, list):
                 continue
             sample = [_mask_sensitive_row(r) for r in rows[:3] if isinstance(r, dict)]
@@ -599,6 +655,12 @@ def cleanup_backups(keep: int = 10) -> dict:
                 old_file.unlink()
                 removed_files += 1
                 freed_bytes += sz
+                dump_pair = old_file.with_suffix(".dump")
+                if dump_pair.exists():
+                    dsz = dump_pair.stat().st_size
+                    dump_pair.unlink()
+                    removed_files += 1
+                    freed_bytes += dsz
             except Exception:
                 pass
 
@@ -798,12 +860,103 @@ def run_maintenance(target: str = "both") -> dict:
     return {"success": ok_any, "results": results}
 
 
-def restore_backup(folder: str, filename: str) -> dict:
-    """Restaura um snapshot JSON de backup de forma transacional, salvando pré-backup de segurança."""
+def create_full_snapshot(target: str = "prod") -> dict:
+    """Gera snapshot completo sob demanda (JSON REPEATABLE READ com SHA-256 + pg_dump -Fc) e envia à nuvem se ativo."""
+    if target not in ("prod", "local"):
+        return {"success": False, "error": "Destino inválido (use 'prod' ou 'local')."}
+
+    sync_prod.load_env(ROOT / ".env")
+    sync_prod.load_env(ROOT / ".sync.env")
+    url = (
+        (os.environ.get("PROD_DATABASE_URL") or sync_prod.COOLIFY_DATABASE_URL)
+        if target == "prod"
+        else (os.environ.get("LOCAL_DATABASE_URL") or os.environ.get("DATABASE_URL"))
+    )
+    if not url:
+        return {"success": False, "error": f"URL do banco {target} não configurada."}
+
+    bdir = ROOT / f"backups_{target}"
+    bdir.mkdir(parents=True, exist_ok=True)
+    stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    json_path = bdir / f"{target}_snapshot_{stamp}.json"
+    dump_path = json_path.with_suffix(".dump")
+
+    conn = None
+    cur = None
+    try:
+        conn = sync_prod.connect(url, target.upper())
+        conn.set_session(isolation_level="REPEATABLE READ", readonly=True)
+        cur = conn.cursor()
+
+        tables_payload = {}
+        for tbl in sync_prod.topo_sort(sync_prod.list_tables(cur), sync_prod.get_fk_dependencies(cur)):
+            cols = [c[0] for c in sync_prod.get_columns(cur, tbl)]
+            pk = sync_prod.get_primary_key(cur, tbl)
+            if not pk:
+                continue
+            snap = sync_prod.fetch_rows(cur, tbl, cols, pk)
+            tables_payload[tbl] = [dict(zip(cols, r)) for r in snap.values()]
+
+        cur.close()
+        conn.close()
+        conn = None
+
+        normalized = json.loads(json.dumps(tables_payload, ensure_ascii=False, default=sync_prod.json_default))
+        total_rows = sum(len(v) for v in normalized.values())
+        dump_res = backup_cloud.create_pg_dump(url, dump_path)
+
+        wrapped = {
+            "meta": {
+                "format": "ecosync_backup_v2",
+                "created_at": dt.datetime.now().isoformat(),
+                "environment": target,
+                "full_snapshot": True,
+                "isolation": "REPEATABLE READ",
+                "tables_count": len(normalized),
+                "total_rows": total_rows,
+                "sha256": backup_cloud.compute_tables_sha256(normalized),
+                "pg_dump": {
+                    "file": dump_res["filename"],
+                    "sha256": dump_res["sha256"],
+                    "size_kb": dump_res["size_kb"],
+                } if dump_res.get("success") else None,
+            },
+            "tables": normalized,
+        }
+        json_path.write_text(json.dumps(wrapped, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        cloud_res = None
+        secrets = backup_cloud.load_cloud_secrets(ROOT)
+        if secrets.get("auto_upload", True) and (secrets.get("token_info") or secrets.get("service_account_info")):
+            cloud_res = backup_cloud.upload_backup_file(ROOT, target, json_path.name)
+
+        return {
+            "success": True,
+            "target": target,
+            "filename": json_path.name,
+            "dump_created": bool(dump_res.get("success")),
+            "dump_filename": dump_res.get("filename") if dump_res.get("success") else None,
+            "dump_error": dump_res.get("error") if not dump_res.get("success") else None,
+            "tables_count": len(normalized),
+            "total_rows": total_rows,
+            "cloud_uploaded": bool(cloud_res and cloud_res.get("success")),
+        }
+    except Exception as exc:
+        return {"success": False, "error": f"Falha ao gerar snapshot: {exc}"}
+    finally:
+        try:
+            if cur: cur.close()
+            if conn: conn.close()
+        except Exception:
+            pass
+
+
+def restore_backup(folder: str, filename: str, mode: str = "json") -> dict:
+    """Restaura um snapshot (JSON UPSERT transacional ou pg_restore completo DDL+Dados), salvando pré-backup antes."""
     folder_map = {"prod": "backups_prod", "local": "backups_local"}
     if folder not in folder_map:
         return {"success": False, "error": "Pasta de backup inválida."}
-    if not filename or Path(filename).name != filename or not filename.endswith(".json"):
+    if not filename or Path(filename).name != filename or not filename.endswith((".json", ".dump")):
         return {"success": False, "error": "Nome de arquivo inválido."}
 
     base_dir = (ROOT / folder_map[folder]).resolve()
@@ -821,10 +974,72 @@ def restore_backup(folder: str, filename: str) -> dict:
     if not dst_url:
         return {"success": False, "error": f"URL de destino ({folder}) não configurada."}
 
+    stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Modo pg_restore completo (DDL + constraints + triggers + todos os dados em transação única)
+    if mode == "dump" or filename.endswith(".dump"):
+        dump_file = target_file if filename.endswith(".dump") else target_file.with_suffix(".dump")
+        if not dump_file.exists():
+            return {"success": False, "error": f"Arquivo .dump correspondente não encontrado ({dump_file.name})."}
+        safety_dump = base_dir / f"pre_restore_{folder}_{stamp}.dump"
+        safety_res = backup_cloud.create_pg_dump(dst_url, safety_dump)
+        res = backup_cloud.restore_pg_dump(dst_url, dump_file)
+        if not res.get("success"):
+            return {"success": False, "error": f"Falha no pg_restore (rollback automático): {res.get('error')}"}
+        return {
+            "success": True,
+            "mode": "pg_restore",
+            "folder": folder,
+            "filename": dump_file.name,
+            "tables_count": "todas (DDL+Dados)",
+            "restored_rows": "completo",
+            "safety_backup": safety_dump.name if safety_res.get("success") else "(não gerado)",
+        }
+
+    conn = None
     try:
-        payload = json.loads(target_file.read_text(encoding="utf-8"))
+        raw_payload = json.loads(target_file.read_text(encoding="utf-8"))
+        integrity = backup_cloud.verify_backup_integrity(raw_payload)
+        if integrity.get("has_checksum") and integrity.get("valid") is False:
+            return {"success": False, "error": "Checksum SHA-256 inválido! Snapshot possivelmente corrompido."}
+        payload, _meta = backup_cloud.extract_backup_tables(raw_payload)
         if not isinstance(payload, dict) or not payload:
             return {"success": False, "error": "Snapshot vazio ou formato JSON inválido."}
+
+        # Pré-backup de segurança em REPEATABLE READ + pg_dump antes da restauração
+        safety_dump = base_dir / f"pre_restore_{folder}_{stamp}.dump"
+        backup_cloud.create_pg_dump(dst_url, safety_dump)
+
+        snap_conn = sync_prod.connect(dst_url, folder.upper())
+        snap_conn.set_session(isolation_level="REPEATABLE READ", readonly=True)
+        snap_cur = snap_conn.cursor()
+        valid_tables_snap = list(sync_prod.list_tables(snap_cur))
+        safety_tables = {}
+        for tbl in sync_prod.topo_sort(valid_tables_snap, sync_prod.get_fk_dependencies(snap_cur)):
+            cols = [c[0] for c in sync_prod.get_columns(snap_cur, tbl)]
+            pk = sync_prod.get_primary_key(snap_cur, tbl)
+            if pk:
+                snap = sync_prod.fetch_rows(snap_cur, tbl, cols, pk)
+                safety_tables[tbl] = [dict(zip(cols, r)) for r in snap.values()]
+        snap_cur.close()
+        snap_conn.close()
+
+        normalized_safety = json.loads(json.dumps(safety_tables, ensure_ascii=False, default=sync_prod.json_default))
+        safety_wrapped = {
+            "meta": {
+                "format": "ecosync_backup_v2",
+                "created_at": dt.datetime.now().isoformat(),
+                "environment": folder,
+                "full_snapshot": True,
+                "isolation": "REPEATABLE READ",
+                "tables_count": len(normalized_safety),
+                "total_rows": sum(len(v) for v in normalized_safety.values()),
+                "sha256": backup_cloud.compute_tables_sha256(normalized_safety),
+            },
+            "tables": normalized_safety,
+        }
+        safety_path = base_dir / f"pre_restore_{folder}_{stamp}.json"
+        safety_path.write_text(json.dumps(safety_wrapped, ensure_ascii=False, indent=2), encoding="utf-8")
 
         conn = sync_prod.connect(dst_url, folder.upper())
         cur = conn.cursor()
@@ -834,23 +1049,7 @@ def restore_backup(folder: str, filename: str) -> dict:
             cur.close(); conn.close()
             return {"success": False, "error": "Nenhuma tabela válida encontrada no snapshot."}
 
-        # Ordena respeitando chaves estrangeiras
         ordered_tables = sync_prod.topo_sort(target_tables, sync_prod.get_fk_dependencies(cur))
-
-        # Salva pré-backup de segurança antes da restauração
-        safety_payload = {}
-        for tbl in ordered_tables:
-            cols = [c[0] for c in sync_prod.get_columns(cur, tbl)]
-            pk = sync_prod.get_primary_key(cur, tbl)
-            if pk:
-                snap = sync_prod.fetch_rows(cur, tbl, cols, pk)
-                safety_payload[tbl] = [dict(zip(cols, r)) for r in snap.values()]
-        stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-        safety_path = base_dir / f"pre_restore_{folder}_{stamp}.json"
-        safety_path.write_text(
-            json.dumps(safety_payload, ensure_ascii=False, indent=2, default=sync_prod.json_default),
-            encoding="utf-8",
-        )
 
         restored_rows = 0
         for tbl in ordered_tables:
@@ -936,7 +1135,11 @@ def main():
     elif cmd == "restore":
         folder = sys.argv[2] if len(sys.argv) > 2 else ""
         filename = sys.argv[3] if len(sys.argv) > 3 else ""
-        out = restore_backup(folder, filename)
+        mode = sys.argv[4] if len(sys.argv) > 4 else "json"
+        out = restore_backup(folder, filename, mode=mode)
+    elif cmd == "snapshot":
+        target = sys.argv[2] if len(sys.argv) > 2 else "prod"
+        out = create_full_snapshot(target)
     elif cmd == "maintenance":
         target = sys.argv[2] if len(sys.argv) > 2 else "both"
         out = run_maintenance(target)
@@ -955,6 +1158,39 @@ def main():
         uid = sys.argv[2] if len(sys.argv) > 2 else ""
         sdb = sys.argv[3] if len(sys.argv) > 3 else "local"
         out = touch_login(uid, sdb)
+    elif cmd == "cloud-status":
+        check_remote = "--check" in sys.argv[2:]
+        include_sensitive = "--sensitive" in sys.argv[2:]
+        out = backup_cloud.get_cloud_status(ROOT, check_remote=check_remote, include_sensitive=include_sensitive)
+    elif cmd == "cloud-save":
+        raw_stdin = sys.stdin.read().strip() if (sys.stdin and not sys.stdin.isatty()) else "{}"
+        try:
+            payload = json.loads(raw_stdin or "{}")
+        except Exception:
+            payload = {}
+        out = backup_cloud.save_cloud_config(ROOT, payload)
+    elif cmd == "cloud-connect":
+        out = backup_cloud.connect_google_drive(ROOT)
+    elif cmd == "cloud-disconnect":
+        out = backup_cloud.disconnect_google_drive(ROOT)
+    elif cmd == "cloud-upload":
+        folder = sys.argv[2] if len(sys.argv) > 2 else ""
+        filename = sys.argv[3] if len(sys.argv) > 3 else ""
+        out = backup_cloud.upload_backup_file(ROOT, folder, filename)
+    elif cmd == "cloud-sync-all":
+        out = backup_cloud.sync_all_pending(ROOT)
+    elif cmd == "cloud-list":
+        out = backup_cloud.list_drive_backups(ROOT)
+    elif cmd == "cloud-download":
+        drive_id = sys.argv[2] if len(sys.argv) > 2 else ""
+        target_folder = sys.argv[3] if len(sys.argv) > 3 else "prod"
+        raw_stdin = sys.stdin.read().strip() if (sys.stdin and not sys.stdin.isatty()) else "{}"
+        rec_key = ""
+        try:
+            rec_key = json.loads(raw_stdin or "{}").get("recovery_key", "")
+        except Exception:
+            pass
+        out = backup_cloud.download_drive_backup(ROOT, drive_id, target_folder=target_folder, recovery_key=rec_key)
     else:
         out = {"error": f"Comando '{cmd}' desconhecido"}
 
